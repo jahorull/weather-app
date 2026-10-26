@@ -1,0 +1,6 @@
+{
+  "name": "Atmos 3D",
+  "description": "Futuristic 3D weather forecast application with interactive volumetric weather environments, rotating 3D Earth explorer, live meteorological telemetry, and offline caching.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

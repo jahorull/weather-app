@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">Atmos 3D</string>
+    <string name="nav_dashboard">Weather</string>
+    <string name="nav_forecasts">Forecasts</string>
+    <string name="nav_globe">3D Globe</string>
+    <string name="nav_analytics">Analytics</string>
+    <string name="nav_locations">Cities</string>
+    <string name="nav_settings">Settings</string>
+    <string name="location_rationale_title">Enable Local Atmospheric Telemetry</string>
+    <string name="location_rationale_body">Atmos 3D uses your device\'s GPS coordinates solely to detect your current city and render live 3D weather conditions for your exact location. Your coordinates are never shared for advertising.</string>
+    <string name="action_grant_location">Allow Location</string>
+    <string name="action_not_now">Use Saved City</string>
+    <string name="action_refresh">Refresh live weather</string>
+    <string name="action_immersive_mode">Toggle full-screen 3D mode</string>
+    <string name="status_live_data">LIVE API</string>
+    <string name="status_cached_data">OFFLINE CACHE</string>
+    <string name="search_cities_hint">Search city or region (e.g., Tokyo, London, Dhaka)…</string>
+</resources>

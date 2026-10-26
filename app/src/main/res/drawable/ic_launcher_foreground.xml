@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Glowing 3D Sun Sphere -->
+    <path
+        android:fillColor="#FBBF24"
+        android:pathData="M62,42m-14,0a14,14 0,1 1,28 0a14,14 0,1 1,-28 0" />
+    <!-- Volumetric Cloud Silhouette -->
+    <path
+        android:fillColor="#F8FAFC"
+        android:pathData="M70,68H38c-7.73,0 -14,-6.27 -14,-14c0,-6.82 4.88,-12.5 11.35,-13.75C37.76,33.19 44.32,28 52,28c8.95,0 16.38,6.54 17.76,15.11C75.59,44.08 80,49.13 80,55.2C80,62.27 75.52,68 70,68z" />
+    <!-- Cyan Electric Lightning / Atmosphere Accent -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M55,54L45,68h8l-3,13l14,-16h-8z" />
+</vector>
