@@ -6,9 +6,11 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.ai.AtmosUniverseEngine
 import com.example.model.GraphicsQuality
 import com.example.model.TempUnit
 import com.example.model.ThemeMode
+import com.example.model.TwinUserPreference
 import com.example.model.UserSettings
 import com.example.model.WindUnit
 import kotlinx.coroutines.flow.Flow
@@ -33,6 +35,7 @@ class UserSettingsStore(private val context: Context) {
         val WIND_ALERT_THRESHOLD = intPreferencesKey("wind_alert_threshold_kmh")
         val AQI_ALERT_THRESHOLD = intPreferencesKey("aqi_alert_threshold_us")
         val MONITOR_ALL_FAVORITE_CITIES = booleanPreferencesKey("monitor_all_favorite_cities")
+        val TWIN_PREFERENCES_JSON = stringPreferencesKey("personal_weather_twin_preferences_json")
     }
 
     val settingsFlow: Flow<UserSettings> = context.atmosDataStore.data.map { prefs ->
@@ -60,6 +63,15 @@ class UserSettingsStore(private val context: Context) {
             aqiAlertThresholdUs = prefs[Keys.AQI_ALERT_THRESHOLD] ?: 100,
             monitorAllFavoriteCities = prefs[Keys.MONITOR_ALL_FAVORITE_CITIES] ?: true
         )
+    }
+
+    val twinPreferencesFlow: Flow<List<TwinUserPreference>> = context.atmosDataStore.data.map { prefs ->
+        AtmosUniverseEngine.decodePreferences(prefs[Keys.TWIN_PREFERENCES_JSON])
+    }
+
+    suspend fun saveTwinPreferences(preferences: List<TwinUserPreference>) {
+        val encoded = AtmosUniverseEngine.encodePreferences(preferences)
+        context.atmosDataStore.edit { it[Keys.TWIN_PREFERENCES_JSON] = encoded }
     }
 
     suspend fun setTempUnit(unit: TempUnit) {

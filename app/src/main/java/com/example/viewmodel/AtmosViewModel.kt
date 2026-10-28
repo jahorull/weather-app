@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.ai.AiSceneCommandResult
 import com.example.ai.AtmosAiIntelligence
+import com.example.ai.AtmosUniverseEngine
 import com.example.ai.CopilotChatMessage
 import com.example.ai.CopilotLanguage
 import com.example.ai.LifeAdvisorItem
@@ -22,10 +23,14 @@ import com.example.model.PersonalThresholdAlert
 import com.example.model.SavedLocation
 import com.example.model.TempUnit
 import com.example.model.ThemeMode
+import com.example.model.TimeMachineSlot
+import com.example.model.TwinInterestCategory
+import com.example.model.TwinUserPreference
 import com.example.model.UserSettings
 import com.example.model.WeatherBundle
 import com.example.model.WeatherFormatter
 import com.example.model.WeatherSceneType
+import com.example.model.WhatIfSimulationState
 import com.example.model.WindUnit
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -45,6 +50,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.roundToInt
 
 enum class AtmosDestination(val route: String, val label: String) {
     DASHBOARD("dashboard", "Weather"),
@@ -78,7 +84,7 @@ data class AtmosUiState(
         CopilotChatMessage(
             id = "welcome_msg",
             isUser = false,
-            text = "Welcome to Atmos 3D AI Weather Copilot! Ask me any question in English or Bengali (বাংলা) about current conditions, hourly rain chances, the 7-day outlook, UV index, or US AQI. Every answer is strictly grounded in your live Open-Meteo & NWS weather telemetry.",
+            text = "Welcome to Atmosyn AI Weather Copilot! Ask me any question in English or Bengali (বাংলা) about current conditions, hourly rain chances, the 7-day outlook, UV index, or US AQI. Every answer is strictly grounded in your live Open-Meteo & NWS weather telemetry.",
             timestampLabel = "Ready",
             groundingBadge = "Grounded AI · EN / বাংলা"
         )
@@ -100,7 +106,12 @@ data class AtmosUiState(
     val selectedFarmingCrop: BangladeshCrop = BangladeshCrop.AMAN_BORO_RICE,
     val triggeredPersonalAlerts: List<PersonalThresholdAlert> = emptyList(),
     val hasNotificationPermission: Boolean = false,
-    val lastNotificationStatusMessage: String? = null
+    val lastNotificationStatusMessage: String? = null,
+    // Signature Universe Features: What-If Lab, Weather Time Machine & Personal Weather Twin
+    val whatIfSimulation: WhatIfSimulationState = WhatIfSimulationState(),
+    val isProcessingWhatIfCommand: Boolean = false,
+    val timeMachineSelectedSlot: TimeMachineSlot? = null,
+    val twinPreferences: List<TwinUserPreference> = AtmosUniverseEngine.defaultTwinPreferences()
 )
 
 class AtmosViewModel(
@@ -121,6 +132,12 @@ class AtmosViewModel(
     }
 
     private fun observeSettingsAndLocations() {
+        viewModelScope.launch {
+            settingsStore.twinPreferencesFlow.collectLatest { prefs ->
+                _uiState.update { it.copy(twinPreferences = prefs) }
+            }
+        }
+
         viewModelScope.launch {
             repository.ensureSeededLocations()
             repository.savedLocationsFlow.collectLatest { locations ->
@@ -336,7 +353,9 @@ class AtmosViewModel(
             it.copy(
                 activeSceneOverride = sceneType,
                 lastSceneCommandResult = if (sceneType == null) null else it.lastSceneCommandResult,
-                sceneCommandErrorMessage = null
+                sceneCommandErrorMessage = null,
+                whatIfSimulation = if (sceneType == null) WhatIfSimulationState(isActive = false) else it.whatIfSimulation.copy(isActive = false),
+                timeMachineSelectedSlot = if (sceneType == null) null else it.timeMachineSelectedSlot
             )
         }
     }
@@ -839,6 +858,180 @@ class AtmosViewModel(
                 triggeredPersonalAlerts = alerts,
                 lastNotificationStatusMessage = statusMsg
             )
+        }
+    }
+
+    // =========================================================================
+    // SIGNATURE UNIVERSE FEATURES: WHAT-IF LAB, TIME MACHINE & WEATHER TWIN
+    // =========================================================================
+
+    fun updateWhatIfParameters(
+        windStrength: Float = _uiState.value.whatIfSimulation.windStrength,
+        cloudDensity: Float = _uiState.value.whatIfSimulation.cloudDensity,
+        rainIntensity: Float = _uiState.value.whatIfSimulation.rainIntensity,
+        fogDensity: Float = _uiState.value.whatIfSimulation.fogDensity,
+        sunlightIntensity: Float = _uiState.value.whatIfSimulation.sunlightIntensity,
+        timeOfDayHour: Float = _uiState.value.whatIfSimulation.timeOfDayHour
+    ) {
+        val w = windStrength.coerceIn(0f, 1f)
+        val c = cloudDensity.coerceIn(0f, 1f)
+        val r = rainIntensity.coerceIn(0f, 1f)
+        val f = fogDensity.coerceIn(0f, 1f)
+        val s = sunlightIntensity.coerceIn(0f, 1f)
+        val hr = timeOfDayHour.coerceIn(0f, 23.5f)
+        val derivedScene = WhatIfSimulationState.deriveSceneFromParameters(
+            windStrength = w,
+            cloudDensity = c,
+            rainIntensity = r,
+            fogDensity = f,
+            sunlightIntensity = s,
+            timeOfDayHour = hr
+        )
+        val explanation = "HYPOTHETICAL SIMULATION: Wind ${(w * 100).roundToInt()}%, Clouds ${(c * 100).roundToInt()}%, Rain ${(r * 100).roundToInt()}%, Fog ${(f * 100).roundToInt()}%, Sunlight ${(s * 100).roundToInt()}%, Time ${AtmosUniverseEngine.formatFractionalHour(hr)} (${derivedScene.title}). Does not change or predict real atmospheric conditions."
+
+        _uiState.update {
+            it.copy(
+                whatIfSimulation = WhatIfSimulationState(
+                    isActive = true,
+                    windStrength = w,
+                    cloudDensity = c,
+                    rainIntensity = r,
+                    fogDensity = f,
+                    sunlightIntensity = s,
+                    timeOfDayHour = hr,
+                    derivedSceneType = derivedScene,
+                    activeCommandLabel = "Manual Parameter Experiment",
+                    simulationExplanation = explanation
+                ),
+                activeSceneOverride = derivedScene,
+                timeMachineSelectedSlot = null
+            )
+        }
+    }
+
+    fun executeWhatIfCommand(command: String) {
+        val trimmed = command.trim()
+        if (trimmed.isEmpty()) return
+
+        val immediate = AtmosUniverseEngine.parseWhatIfCommandLocally(trimmed)
+        if (immediate != null) {
+            _uiState.update {
+                it.copy(
+                    whatIfSimulation = immediate,
+                    activeSceneOverride = immediate.derivedSceneType,
+                    timeMachineSelectedSlot = null
+                )
+            }
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isProcessingWhatIfCommand = true) }
+            try {
+                val resolved = AtmosUniverseEngine.resolveWhatIfCommand(trimmed)
+                _uiState.update {
+                    it.copy(
+                        whatIfSimulation = resolved,
+                        activeSceneOverride = resolved.derivedSceneType,
+                        timeMachineSelectedSlot = null,
+                        isProcessingWhatIfCommand = false
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _uiState.update { it.copy(isProcessingWhatIfCommand = false) }
+            }
+        }
+    }
+
+    fun resetWhatIfSimulation() {
+        _uiState.update {
+            it.copy(
+                whatIfSimulation = WhatIfSimulationState(isActive = false),
+                activeSceneOverride = null,
+                timeMachineSelectedSlot = null,
+                isProcessingWhatIfCommand = false
+            )
+        }
+    }
+
+    fun selectTimeMachineSlot(slot: TimeMachineSlot) {
+        _uiState.update {
+            it.copy(
+                timeMachineSelectedSlot = slot,
+                whatIfSimulation = it.whatIfSimulation.copy(isActive = false),
+                activeSceneOverride = slot.sceneType ?: it.activeSceneOverride
+            )
+        }
+    }
+
+    fun exitTimeMachineMode() {
+        _uiState.update {
+            it.copy(
+                timeMachineSelectedSlot = null,
+                activeSceneOverride = null
+            )
+        }
+    }
+
+    fun saveOrUpdateTwinPreference(
+        existingId: String?,
+        interest: TwinInterestCategory,
+        customTitle: String,
+        preferredWindow: String,
+        userNote: String
+    ) {
+        val title = customTitle.trim().ifEmpty { interest.labelEn }
+        val window = preferredWindow.trim().ifEmpty { interest.defaultWindow }
+        val note = userNote.trim()
+        val nowStamp = "Saved " + SimpleDateFormat("MMM d, HH:mm", Locale.US).format(Date())
+
+        val currentList = _uiState.value.twinPreferences
+        val updatedList = if (existingId != null && currentList.any { it.id == existingId }) {
+            currentList.map { item ->
+                if (item.id == existingId) {
+                    item.copy(
+                        interest = interest,
+                        customTitle = title,
+                        preferredWindow = window,
+                        userNote = note,
+                        updatedAtLabel = nowStamp
+                    )
+                } else {
+                    item
+                }
+            }
+        } else {
+            val newPref = TwinUserPreference(
+                id = existingId ?: "twin_${UUID.randomUUID().toString().take(8)}",
+                interest = interest,
+                customTitle = title,
+                preferredWindow = window,
+                userNote = note,
+                updatedAtLabel = nowStamp
+            )
+            currentList + newPref
+        }
+
+        _uiState.update { it.copy(twinPreferences = updatedList) }
+        viewModelScope.launch {
+            settingsStore.saveTwinPreferences(updatedList)
+        }
+    }
+
+    fun deleteTwinPreference(preferenceId: String) {
+        val updatedList = _uiState.value.twinPreferences.filterNot { it.id == preferenceId }
+        _uiState.update { it.copy(twinPreferences = updatedList) }
+        viewModelScope.launch {
+            settingsStore.saveTwinPreferences(updatedList)
+        }
+    }
+
+    fun resetTwinPreferencesToDefault() {
+        val defaults = AtmosUniverseEngine.defaultTwinPreferences()
+        _uiState.update { it.copy(twinPreferences = defaults) }
+        viewModelScope.launch {
+            settingsStore.saveTwinPreferences(defaults)
         }
     }
 

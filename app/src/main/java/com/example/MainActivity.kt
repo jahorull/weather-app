@@ -213,11 +213,15 @@ fun Atmos3DApp(
     val effectiveReducedMotion = systemReducedMotion || uiState.settings.reducedMotion
     val effectiveTilt = if (effectiveReducedMotion) TiltVector() else tiltVector
 
-    val effectiveScene = uiState.activeSceneOverride
+    val effectiveScene = uiState.whatIfSimulation.takeIf { it.isActive }?.derivedSceneType
+        ?: uiState.timeMachineSelectedSlot?.sceneType
+        ?: uiState.activeSceneOverride
         ?: uiState.weatherBundle?.current?.sceneType
         ?: uiState.activeLocation.cachedSceneType
         ?: WeatherSceneType.SUNNY
-    val localHour = uiState.weatherBundle?.current?.localHourOfDay ?: 12
+    val localHour = uiState.timeMachineSelectedSlot?.localHourOfDay
+        ?: uiState.weatherBundle?.current?.localHourOfDay
+        ?: 12
 
     LaunchedEffect(context) {
         val hasFine = ContextCompat.checkSelfPermission(
@@ -312,7 +316,7 @@ fun Atmos3DApp(
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                 val isWideScreen = maxWidth >= 640.dp
 
-                // Full-bleed real-time 3D weather environment backdrop synchronized with local time & accessibility
+                // Full-bleed real-time 3D weather environment backdrop synchronized with local time, Time Machine & What-If Lab
                 Weather3DSceneView(
                     sceneType = effectiveScene,
                     graphicsQuality = uiState.settings.graphicsQuality,
@@ -320,6 +324,7 @@ fun Atmos3DApp(
                     localHourOfDay = localHour,
                     reducedMotion = effectiveReducedMotion,
                     interactiveTouch = uiState.isImmersiveMode || uiState.currentDestination == AtmosDestination.DASHBOARD,
+                    whatIfSimulation = uiState.whatIfSimulation,
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("weather_3d_scene_backdrop")
@@ -375,7 +380,9 @@ fun Atmos3DApp(
                                             onNavigateToForecasts = { viewModel.navigateTo(AtmosDestination.FORECASTS) },
                                             onNavigateToCities = { viewModel.navigateTo(AtmosDestination.LOCATIONS) },
                                             onNavigateToAiCopilot = { viewModel.navigateTo(AtmosDestination.AI_COPILOT) },
-                                            onAskAiAboutForecast = { prompt -> viewModel.askAiAboutForecastPeriod(prompt) }
+                                            onAskAiAboutForecast = { prompt -> viewModel.askAiAboutForecastPeriod(prompt) },
+                                            whatIfSimulation = uiState.whatIfSimulation,
+                                            timeMachineSelectedSlot = uiState.timeMachineSelectedSlot
                                         )
                                     }
                                     AtmosDestination.FORECASTS -> {
@@ -456,6 +463,34 @@ fun Atmos3DApp(
                                             onRequestNotificationPermission = requestNotificationPermissionFlow,
                                             onEvaluateAndNotifyNow = {
                                                 viewModel.evaluateAndNotifyPersonalAlerts(context)
+                                            },
+                                            whatIfSimulation = uiState.whatIfSimulation,
+                                            isProcessingWhatIfCommand = uiState.isProcessingWhatIfCommand,
+                                            timeMachineSelectedSlot = uiState.timeMachineSelectedSlot,
+                                            twinPreferences = uiState.twinPreferences,
+                                            onUpdateWhatIfParameters = { w, c, r, f, s, hr ->
+                                                viewModel.updateWhatIfParameters(w, c, r, f, s, hr)
+                                            },
+                                            onExecuteWhatIfCommand = { cmd ->
+                                                viewModel.executeWhatIfCommand(cmd)
+                                            },
+                                            onResetWhatIfSimulation = {
+                                                viewModel.resetWhatIfSimulation()
+                                            },
+                                            onSelectTimeMachineSlot = { slot ->
+                                                viewModel.selectTimeMachineSlot(slot)
+                                            },
+                                            onExitTimeMachine = {
+                                                viewModel.exitTimeMachineMode()
+                                            },
+                                            onSaveOrUpdateTwinPreference = { id, interest, title, window, note ->
+                                                viewModel.saveOrUpdateTwinPreference(id, interest, title, window, note)
+                                            },
+                                            onDeleteTwinPreference = { id ->
+                                                viewModel.deleteTwinPreference(id)
+                                            },
+                                            onResetTwinDefaults = {
+                                                viewModel.resetTwinPreferencesToDefault()
                                             }
                                         )
                                     }
@@ -590,7 +625,15 @@ private fun AtmosSideNavigationRail(
 ) {
     NavigationRail(
         containerColor = Color(0xFF070F1E).copy(alpha = 0.85f),
-        contentColor = Color.White
+        contentColor = Color.White,
+        header = {
+            Text(
+                text = "ATMOSYN",
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                color = accentColor,
+                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+            )
+        }
     ) {
         AtmosDestination.entries.forEach { dest ->
             val selected = currentDestination == dest

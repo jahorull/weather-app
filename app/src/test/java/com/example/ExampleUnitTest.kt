@@ -340,5 +340,138 @@ class ExampleUnitTest {
         )
         assertTrue(disabledAlerts.isEmpty())
     }
+
+    @Test
+    fun whatIfLab_mapsNaturalLanguageCommandsToValidatedParameters_andLabelsHypotheticalSimulation() {
+        val stormySunset = com.example.ai.AtmosUniverseEngine.parseWhatIfCommandLocally("Create a stormy sunset scene.")!!
+        assertTrue(stormySunset.isActive)
+        assertEquals(WeatherSceneType.SUNSET, stormySunset.derivedSceneType)
+        assertTrue(stormySunset.windStrength >= 0.70f)
+        assertTrue(stormySunset.rainIntensity >= 0.50f)
+        assertEquals(18.0f, stormySunset.timeOfDayHour, 0.1f)
+        assertTrue(stormySunset.simulationExplanation.contains("HYPOTHETICAL SIMULATION"))
+        assertTrue(stormySunset.simulationExplanation.contains("does not alter or predict real weather"))
+
+        val foggyMorning = com.example.ai.AtmosUniverseEngine.parseWhatIfCommandLocally("Dense foggy morning with light rain.")!!
+        assertTrue(foggyMorning.isActive)
+        assertTrue(foggyMorning.fogDensity >= 0.70f)
+        assertTrue(foggyMorning.rainIntensity > 0.20f)
+        assertEquals(6.5f, foggyMorning.timeOfDayHour, 0.1f)
+    }
+
+    @Test
+    fun weatherTimeMachine_separatesHistoricalCurrentForecastAndUnavailablePeriods() {
+        val dhaka = DefaultGlobalCities.hubs.first()
+
+        // 1. Offline bundle -> returns explicit UNAVAILABLE_PERIOD without inventing data
+        val offlineSlots = com.example.ai.AtmosUniverseEngine.buildTimeMachineSlots(dhaka, null)
+        assertEquals(1, offlineSlots.size)
+        assertEquals(com.example.model.TimeMachinePointType.UNAVAILABLE_PERIOD, offlineSlots.first().pointType)
+        assertEquals(null, offlineSlots.first().temperatureC)
+
+        // 2. Live bundle with pastHourly, current, hourly, and daily
+        val bundle = WeatherApiMapper.mapToWeatherBundle(
+            location = dhaka,
+            response = OpenMeteoForecastResponse(
+                current = CurrentDto(
+                    time = "2026-10-28T14:00",
+                    temperature2m = 30.0,
+                    apparentTemperature = 33.0,
+                    weatherCode = 1,
+                    windSpeed10m = 15.0
+                ),
+                hourly = com.example.data.remote.HourlyDto(
+                    time = listOf(
+                        "2026-10-28T11:00",
+                        "2026-10-28T12:00",
+                        "2026-10-28T13:00",
+                        "2026-10-28T14:00",
+                        "2026-10-28T15:00",
+                        "2026-10-28T16:00",
+                        "2026-10-28T17:00",
+                        "2026-10-28T18:00"
+                    ),
+                    temperature2m = listOf(27.0, 28.0, 29.0, 30.0, 30.5, 29.5, 28.0, 27.0),
+                    apparentTemperature = listOf(29.0, 30.0, 31.0, 33.0, 33.5, 32.0, 30.0, 29.0),
+                    precipitationProbability = listOf(10, 15, 20, 25, 30, 40, 50, 60),
+                    weatherCode = listOf(1, 1, 2, 1, 2, 61, 61, 63),
+                    windSpeed10m = listOf(10.0, 12.0, 14.0, 15.0, 16.0, 18.0, 20.0, 22.0)
+                ),
+                daily = com.example.data.remote.DailyDto(
+                    time = listOf("2026-10-28", "2026-10-29", "2026-10-30", "2026-10-31"),
+                    weatherCode = listOf(1, 61, 2, 0),
+                    temperature2mMax = listOf(31.0, 29.0, 30.0, 32.0),
+                    temperature2mMin = listOf(24.0, 23.0, 23.5, 24.5),
+                    precipitationProbabilityMax = listOf(30, 70, 20, 10),
+                    windSpeed10mMax = listOf(18.0, 25.0, 15.0, 12.0)
+                )
+            )
+        )
+
+        assertEquals(3, bundle.pastHourly.size)
+        assertTrue(bundle.pastHourly.all { it.isHistoricalObservation })
+
+        val slots = com.example.ai.AtmosUniverseEngine.buildTimeMachineSlots(dhaka, bundle)
+        assertTrue(slots.any { it.pointType == com.example.model.TimeMachinePointType.HISTORICAL_OBSERVATION })
+        assertEquals(1, slots.count { it.pointType == com.example.model.TimeMachinePointType.CURRENT_OBSERVATION })
+        assertTrue(slots.any { it.pointType == com.example.model.TimeMachinePointType.FORECAST })
+        assertEquals(2, slots.count { it.pointType == com.example.model.TimeMachinePointType.UNAVAILABLE_PERIOD })
+
+        // Unavailable periods must never fabricate temperatures
+        slots.filter { it.pointType == com.example.model.TimeMachinePointType.UNAVAILABLE_PERIOD }.forEach { unavail ->
+            assertEquals(null, unavail.temperatureC)
+            assertTrue(unavail.honestyNoteEn.contains("Unavailable Period"))
+        }
+    }
+
+    @Test
+    fun personalWeatherTwin_encodesDecodesAndGeneratesForecastGroundedRecommendations() {
+        val dhaka = DefaultGlobalCities.hubs.first()
+        val settings = UserSettings()
+        val prefs = com.example.ai.AtmosUniverseEngine.defaultTwinPreferences()
+        assertEquals(3, prefs.size)
+
+        val encoded = com.example.ai.AtmosUniverseEngine.encodePreferences(prefs)
+        val decoded = com.example.ai.AtmosUniverseEngine.decodePreferences(encoded)
+        assertEquals(3, decoded.size)
+        assertEquals(prefs.first().customTitle, decoded.first().customTitle)
+
+        val bundle = WeatherApiMapper.mapToWeatherBundle(
+            location = dhaka,
+            response = OpenMeteoForecastResponse(
+                current = CurrentDto(
+                    time = "2026-10-28T16:00",
+                    temperature2m = 31.0,
+                    apparentTemperature = 34.0,
+                    relativeHumidity2m = 72,
+                    weatherCode = 2,
+                    windSpeed10m = 14.0,
+                    visibilityMeters = 9000.0,
+                    uvIndex = 5.0
+                ),
+                hourly = com.example.data.remote.HourlyDto(
+                    time = listOf("2026-10-28T16:00"),
+                    temperature2m = listOf(31.0),
+                    apparentTemperature = listOf(34.0),
+                    precipitationProbability = listOf(35),
+                    weatherCode = listOf(2),
+                    windSpeed10m = listOf(14.0)
+                )
+            ),
+            airQualityResponse = OpenMeteoAirQualityResponse(
+                current = AirQualityCurrentDto(usAqi = 68, pm25 = 18.0, pm10 = 32.0)
+            )
+        )
+
+        val recs = com.example.ai.AtmosUniverseEngine.generateTwinRecommendations(
+            preferences = decoded,
+            location = dhaka,
+            bundle = bundle,
+            settings = settings
+        )
+        assertEquals(3, recs.size)
+        assertTrue(recs.all { it.forecastEvidence.contains("Dhaka Telemetry") })
+        assertTrue(recs.all { it.safetyBoundaryNote.contains("not a health, medical, or safety guarantee") })
+    }
 }
 

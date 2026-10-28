@@ -196,7 +196,7 @@ object AtmosAiIntelligence {
         }
 
         return """
-            === GROUNDED ATMOS 3D WEATHER API TELEMETRY ===
+            === GROUNDED ATMOSYN WEATHER API TELEMETRY ===
             Location: ${weatherBundle.location.cityName}, ${weatherBundle.location.region}, ${weatherBundle.location.country}
             Coordinates: ${weatherBundle.location.latitude}, ${weatherBundle.location.longitude}
             City Local Time: ${cur.cityLocalTimeLabel.ifBlank { "Unavailable" }} (Hour: ${cur.localHourOfDay}:00)
@@ -245,7 +245,7 @@ object AtmosAiIntelligence {
     ): Flow<String> = flow {
         val telemetryContext = buildGroundedWeatherContext(activeLocation, weatherBundle, settings)
         val fullPrompt = """
-            You are the Atmos 3D AI Weather Intelligence Copilot.
+            You are the Atmosyn AI Weather Intelligence Copilot.
             ${language.instruction}
             
             STRICT GROUNDING & SAFETY RULES:

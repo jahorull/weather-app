@@ -77,11 +77,13 @@ import com.example.R
 import com.example.model.AirQualityData
 import com.example.model.HourlyForecast
 import com.example.model.SavedLocation
+import com.example.model.TimeMachineSlot
 import com.example.model.UserSettings
 import com.example.model.WeatherAlert
 import com.example.model.WeatherBundle
 import com.example.model.WeatherFormatter
 import com.example.model.WeatherSceneType
+import com.example.model.WhatIfSimulationState
 import com.example.ui.components.AnimatedWeatherConditionIcon
 import com.example.ui.components.FrostedGlassCard
 import com.example.ui.components.SolarHorizonArc
@@ -145,7 +147,7 @@ fun Atmos3DSplashOverlay(
             }
             Spacer(modifier = Modifier.height(24.dp))
             Text(
-                text = "ATMOS 3D",
+                text = "ATMOSYN",
                 style = MaterialTheme.typography.displayMedium,
                 color = Color.White,
                 fontWeight = FontWeight.Bold
@@ -185,6 +187,8 @@ fun MainDashboardScreen(
     onNavigateToCities: () -> Unit,
     onNavigateToAiCopilot: () -> Unit = {},
     onAskAiAboutForecast: (String) -> Unit = {},
+    whatIfSimulation: WhatIfSimulationState = WhatIfSimulationState(),
+    timeMachineSelectedSlot: TimeMachineSlot? = null,
     modifier: Modifier = Modifier
 ) {
     var showLocationRationaleDialog by remember { mutableStateOf(false) }
@@ -339,6 +343,13 @@ fun MainDashboardScreen(
                                 .padding(vertical = 4.dp)
                                 .testTag("dashboard_city_header")
                         ) {
+                            Text(
+                                text = "ATMOSYN · 3D TELEMETRY",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = accentColor,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
                                     imageVector = Icons.Default.LocationCity,
@@ -749,6 +760,84 @@ fun MainDashboardScreen(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                // 3B. Atmosyn Weather Universe Launchpad & Active Simulation / Time Machine Provenance Banner
+                item {
+                    FrostedGlassCard(
+                        cornerRadius = 22.dp,
+                        accentTint = when {
+                            whatIfSimulation.isActive -> Color(0xFFF472B6)
+                            timeMachineSelectedSlot != null -> Color(timeMachineSelectedSlot.pointType.colorHex)
+                            else -> Color(0xFF38BDF8)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("dashboard_universe_launchpad_card")
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = null,
+                                        tint = Color(0xFF38BDF8),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Column {
+                                        Text(
+                                            text = "ATMOSYN WEATHER UNIVERSE",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF38BDF8)
+                                        )
+                                        Text(
+                                            text = when {
+                                                whatIfSimulation.isActive ->
+                                                    "HYPOTHETICAL SIMULATION ACTIVE (${whatIfSimulation.derivedSceneType.title})"
+                                                timeMachineSelectedSlot != null ->
+                                                    "TIME MACHINE ACTIVE · ${timeMachineSelectedSlot.shortLabel} (${timeMachineSelectedSlot.pointType.badgeLabelEn})"
+                                                else ->
+                                                    "Time Machine · What-If Lab · Personal Weather Twin"
+                                            },
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                Button(
+                                    onClick = onNavigateToAiCopilot,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF38BDF8),
+                                        contentColor = Color(0xFF041322)
+                                    ),
+                                    modifier = Modifier.testTag("dashboard_open_universe_hub_button")
+                                ) {
+                                    Text("Open Universe")
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = when {
+                                    whatIfSimulation.isActive ->
+                                        whatIfSimulation.simulationExplanation
+                                    timeMachineSelectedSlot != null ->
+                                        "Time Machine (${timeMachineSelectedSlot.timestampLabel}): ${timeMachineSelectedSlot.honestyNoteEn}"
+                                    else ->
+                                        "Scrub historical observations & 7-day forecasts in the Time Machine, experiment with 3D atmospheric physics in the What-If Lab, or configure your Personal Weather Twin."
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White.copy(alpha = 0.82f)
+                            )
                         }
                     }
                 }

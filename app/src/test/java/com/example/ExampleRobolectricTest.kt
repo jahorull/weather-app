@@ -36,7 +36,7 @@ class ExampleRobolectricTest {
     @Test
     fun appNameResource_isAtmos3D() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        assertEquals("Atmos 3D", context.getString(R.string.app_name))
+        assertEquals("Atmosyn", context.getString(R.string.app_name))
     }
 
     @Test
@@ -267,6 +267,78 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("threshold_aqi_150").performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("personal_alerts_evaluate_button").performClick()
+        composeTestRule.waitForIdle()
+    }
+
+    @Test
+    fun signatureUniverseFeatures_whatIfLab_timeMachine_andPersonalWeatherTwin_workEndToEnd() {
+        dismissSplashIfPresent()
+
+        // Navigate to AI Copilot / Universe Hub via the Dashboard Universe Launchpad button
+        composeTestRule.onNodeWithTag("dashboard_lazy_column")
+            .performScrollToNode(hasTestTag("dashboard_universe_launchpad_card"))
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("dashboard_open_universe_hub_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("ai_copilot_screen_root").assertIsDisplayed()
+
+        // 1. Test ATMOS WHAT-IF LAB
+        composeTestRule.onNodeWithTag("ai_copilot_screen_root")
+            .performScrollToNode(hasTestTag("atmos_what_if_lab_card"))
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("atmos_what_if_lab_card").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("what_if_simulation_disclaimer_badge").assertIsDisplayed()
+
+        // Tap natural-language command chip 0: "Create a stormy sunset scene."
+        composeTestRule.onNodeWithTag("what_if_preset_chip_0").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("active_3d_scene_sunset").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("what_if_active_explanation_text")
+            .assertTextContains("HYPOTHETICAL SIMULATION", substring = true)
+
+        // Step parameters in What-If Lab (Wind, Rain)
+        composeTestRule.onNodeWithTag("what_if_wind_boost_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("what_if_rain_boost_button").performClick()
+        composeTestRule.waitForIdle()
+
+        // Reset What-If Simulation back to live weather
+        composeTestRule.onNodeWithTag("what_if_reset_button").performClick()
+        composeTestRule.waitForIdle()
+
+        // 2. Test ATMOS WEATHER TIME MACHINE
+        composeTestRule.onNodeWithTag("ai_copilot_screen_root")
+            .performScrollToNode(hasTestTag("atmos_time_machine_card"))
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("atmos_time_machine_card").assertIsDisplayed()
+
+        // Select slot 0 (Unavailable Period / Archive boundary) and verify honest unavailable message
+        composeTestRule.onNodeWithTag("time_machine_slot_0").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("time_machine_point_type_badge").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("time_machine_point_type_badge")
+            .assertTextContains("UNAVAILABLE PERIOD", substring = true)
+        composeTestRule.onNodeWithTag("time_machine_timestamp_text").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("time_machine_datasource_text").assertIsDisplayed()
+
+        // 3. Test PERSONAL WEATHER TWIN (Save, Edit, and Delete Preferences)
+        composeTestRule.onNodeWithTag("ai_copilot_screen_root")
+            .performScrollToNode(hasTestTag("personal_weather_twin_card"))
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("personal_weather_twin_card").assertIsDisplayed()
+
+        // Select Farming interest chip & Save new preference
+        composeTestRule.onNodeWithTag("twin_interest_chip_farming").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("twin_save_pref_button").performClick()
+        composeTestRule.waitForIdle()
+
+        // Edit and Delete an existing preference
+        composeTestRule.onNodeWithTag("twin_edit_twin_pref_photography").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("twin_save_pref_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("twin_delete_twin_pref_commuting").performClick()
         composeTestRule.waitForIdle()
     }
 }

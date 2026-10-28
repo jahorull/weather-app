@@ -196,7 +196,7 @@ fun AiRainRadarCard(
                             text = if (isRefreshing) {
                                 "Loading live RainViewer & Open-Meteo precipitation timeline for ${activeLocation.cityName}…"
                             } else {
-                                "Live radar & precipitation layers are currently unavailable for ${activeLocation.cityName}. Atmos 3D never simulates fake radar sweeps when provider data is missing."
+                                "Live radar & precipitation layers are currently unavailable for ${activeLocation.cityName}. Atmosyn never simulates fake radar sweeps when provider data is missing."
                             },
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color.White.copy(alpha = 0.85f)

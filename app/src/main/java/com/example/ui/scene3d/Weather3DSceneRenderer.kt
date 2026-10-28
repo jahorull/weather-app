@@ -33,9 +33,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import com.example.model.GraphicsQuality
 import com.example.model.WeatherSceneType
+import com.example.model.WhatIfSimulationState
 import com.example.ui.sensor.TiltVector
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 private data class Particle3D(
@@ -96,8 +98,12 @@ fun Weather3DSceneView(
     modifier: Modifier = Modifier,
     localHourOfDay: Int = 12,
     reducedMotion: Boolean = false,
-    interactiveTouch: Boolean = true
+    interactiveTouch: Boolean = true,
+    whatIfSimulation: WhatIfSimulationState? = null
 ) {
+    val activeSim = whatIfSimulation?.takeIf { it.isActive }
+    val effectiveSceneType = activeSim?.derivedSceneType ?: sceneType
+
     val infiniteTransition = rememberInfiniteTransition(label = "atmos_3d_loop")
     val rawTimePhase by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -119,26 +125,27 @@ fun Weather3DSceneView(
     )
 
     // Freeze continuous motion when Reduced Motion accessibility preference is active
-    val timePhase = if (reducedMotion) 12.5f else rawTimePhase
+    val windMultiplier = activeSim?.let { 0.35f + it.windStrength * 2.15f } ?: 1.0f
+    val timePhase = if (reducedMotion) 12.5f else rawTimePhase * windMultiplier
     val pulsePhase = if (reducedMotion) 0.8f else rawPulsePhase
 
     val skyTop by animateColorAsState(
-        targetValue = Color(sceneType.skyTopHex),
+        targetValue = Color(effectiveSceneType.skyTopHex),
         animationSpec = tween(700, easing = FastOutSlowInEasing),
         label = "sky_top"
     )
     val skyMid by animateColorAsState(
-        targetValue = Color(sceneType.skyMidHex),
+        targetValue = Color(effectiveSceneType.skyMidHex),
         animationSpec = tween(700, easing = FastOutSlowInEasing),
         label = "sky_mid"
     )
     val skyBottom by animateColorAsState(
-        targetValue = Color(sceneType.skyBottomHex),
+        targetValue = Color(effectiveSceneType.skyBottomHex),
         animationSpec = tween(700, easing = FastOutSlowInEasing),
         label = "sky_bottom"
     )
     val accentColor by animateColorAsState(
-        targetValue = Color(sceneType.accentColorHex),
+        targetValue = Color(effectiveSceneType.accentColorHex),
         animationSpec = tween(700),
         label = "accent_color"
     )
@@ -197,8 +204,8 @@ fun Weather3DSceneView(
         fovScale = 1.0f + (effectiveTilt.pitch * 0.06f)
     )
 
-    // Compute solar/lunar horizontal & vertical position synchronized with the city's local hour
-    val effectiveHour = when (sceneType) {
+    // Compute solar/lunar horizontal & vertical position synchronized with the city's local hour or What-If Lab hour
+    val effectiveHour = activeSim?.timeOfDayHour?.roundToInt()?.coerceIn(0, 23) ?: when (effectiveSceneType) {
         WeatherSceneType.SUNNY -> if (localHourOfDay in 8..16) localHourOfDay else 12
         WeatherSceneType.SUNSET -> 18
         WeatherSceneType.NIGHT -> if (localHourOfDay !in 6..18) localHourOfDay else 22
@@ -224,7 +231,7 @@ fun Weather3DSceneView(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .testTag("active_3d_scene_${sceneType.name.lowercase()}")
+                .testTag("active_3d_scene_${effectiveSceneType.name.lowercase()}")
         ) {
             val w = size.width
             val h = size.height
@@ -247,39 +254,112 @@ fun Weather3DSceneView(
 
             // 2. Scene-specific Celestial & Volumetric Background Elements with 3D Camera Perspective
             rotate(degrees = if (is2DFallback || reducedMotion) 0f else camera.rollDeg, pivot = Offset(w * 0.5f, h * 0.5f)) {
-                when (sceneType) {
-                    WeatherSceneType.SUNNY -> {
-                        drawSunny3DEnvironment(w, h, camera, celestialWorldX, celestialWorldY, timePhase, pulsePhase, accentColor, is2DFallback)
-                        drawVolumetricClouds3D(w, h, clouds.take(2), camera, timePhase, isStorm = false, isNight = false, isSunset = false)
-                    }
-                    WeatherSceneType.SUNSET -> {
-                        drawSunset3DEnvironment(w, h, camera, timePhase, pulsePhase)
-                        drawVolumetricClouds3D(w, h, clouds.take(4), camera, timePhase, isStorm = false, isNight = false, isSunset = true)
-                    }
-                    WeatherSceneType.NIGHT -> {
+                if (activeSim != null) {
+                    val simHour = activeSim.timeOfDayHour
+                    val isNightSim = simHour < 5.5f || simHour >= 19.5f
+                    val isSunsetSim = simHour in 16.5f..19.5f || simHour in 5.5f..7.0f
+
+                    if (isNightSim) {
                         drawNight3DEnvironment(w, h, particles, camera, celestialWorldX, timePhase, pulsePhase, is2DFallback)
-                        drawVolumetricClouds3D(w, h, clouds.take(3), camera, timePhase, isStorm = false, isNight = true, isSunset = false)
+                    } else if (isSunsetSim && activeSim.sunlightIntensity >= 0.18f) {
+                        drawSunset3DEnvironment(w, h, camera, timePhase, pulsePhase)
+                    } else if (activeSim.sunlightIntensity >= 0.15f) {
+                        drawSunny3DEnvironment(
+                            w = w,
+                            h = h,
+                            camera = camera,
+                            celestialWorldX = celestialWorldX,
+                            celestialWorldY = celestialWorldY,
+                            timePhase = timePhase,
+                            pulsePhase = pulsePhase,
+                            accentColor = accentColor.copy(alpha = activeSim.sunlightIntensity.coerceIn(0.2f, 1f)),
+                            is2DFallback = is2DFallback
+                        )
                     }
-                    WeatherSceneType.CLOUDY -> {
-                        drawAmbientSunGlow(w, h, camX, camY, Color(0xFF7DD3FC).copy(alpha = 0.34f))
-                        drawVolumetricClouds3D(w, h, clouds, camera, timePhase, isStorm = false, isNight = false, isSunset = false)
+
+                    val simCloudCount = (activeSim.cloudDensity * clouds.size).roundToInt().coerceIn(0, clouds.size)
+                    if (simCloudCount > 0) {
+                        val scaledClouds = clouds.take(simCloudCount).map {
+                            it.copy(
+                                scale = it.scale * (0.75f + activeSim.cloudDensity * 0.55f),
+                                speed = it.speed * (0.4f + activeSim.windStrength * 1.9f)
+                            )
+                        }
+                        drawVolumetricClouds3D(
+                            w = w,
+                            h = h,
+                            clusters = scaledClouds,
+                            camera = camera,
+                            timePhase = timePhase,
+                            isStorm = activeSim.rainIntensity >= 0.65f || activeSim.cloudDensity >= 0.80f,
+                            isNight = isNightSim,
+                            isSunset = isSunsetSim
+                        )
                     }
-                    WeatherSceneType.RAINY -> {
-                        drawVolumetricClouds3D(w, h, clouds, camera, timePhase, isStorm = true, isNight = false, isSunset = false)
-                        drawRain3DParticlesAndWetGlass(w, h, particles, camX, camY, timePhase, isHeavyStorm = false, is2DFallback = is2DFallback)
-                    }
-                    WeatherSceneType.THUNDERSTORM -> {
+
+                    if (activeSim.rainIntensity >= 0.68f && activeSim.windStrength >= 0.55f) {
                         drawLightningAndStormFlash(w, h, camX, camY, timePhase, pulsePhase, reducedMotion)
-                        drawVolumetricClouds3D(w, h, clouds, camera, timePhase, isStorm = true, isNight = false, isSunset = false)
-                        drawRain3DParticlesAndWetGlass(w, h, particles, camX, camY, timePhase, isHeavyStorm = true, is2DFallback = is2DFallback)
                     }
-                    WeatherSceneType.SNOWY -> {
-                        drawVolumetricClouds3D(w, h, clouds.take(3), camera, timePhase, isStorm = false, isNight = false, isSunset = false)
-                        drawSnow3DEnvironment(w, h, particles, camX, camY, timePhase, is2DFallback)
+
+                    if (activeSim.rainIntensity >= 0.08f) {
+                        val rainCount = (particles.size * activeSim.rainIntensity.coerceIn(0.15f, 1f)).roundToInt().coerceAtLeast(8)
+                        drawRain3DParticlesAndWetGlass(
+                            w = w,
+                            h = h,
+                            particles = particles.take(rainCount),
+                            camX = camX + (activeSim.windStrength - 0.35f) * 0.45f,
+                            camY = camY,
+                            timePhase = timePhase,
+                            isHeavyStorm = activeSim.rainIntensity >= 0.60f || activeSim.windStrength >= 0.65f,
+                            is2DFallback = is2DFallback
+                        )
                     }
-                    WeatherSceneType.FOGGY -> {
-                        drawVolumetricClouds3D(w, h, clouds.take(3), camera, timePhase, isStorm = false, isNight = false, isSunset = false)
-                        drawFoggy3DLayers(w, h, camX, camY, timePhase, pulsePhase)
+
+                    if (activeSim.fogDensity >= 0.12f) {
+                        drawFoggy3DLayers(
+                            w = w,
+                            h = h,
+                            camX = camX,
+                            camY = camY,
+                            timePhase = timePhase * (0.5f + activeSim.fogDensity),
+                            pulsePhase = pulsePhase
+                        )
+                    }
+                } else {
+                    when (effectiveSceneType) {
+                        WeatherSceneType.SUNNY -> {
+                            drawSunny3DEnvironment(w, h, camera, celestialWorldX, celestialWorldY, timePhase, pulsePhase, accentColor, is2DFallback)
+                            drawVolumetricClouds3D(w, h, clouds.take(2), camera, timePhase, isStorm = false, isNight = false, isSunset = false)
+                        }
+                        WeatherSceneType.SUNSET -> {
+                            drawSunset3DEnvironment(w, h, camera, timePhase, pulsePhase)
+                            drawVolumetricClouds3D(w, h, clouds.take(4), camera, timePhase, isStorm = false, isNight = false, isSunset = true)
+                        }
+                        WeatherSceneType.NIGHT -> {
+                            drawNight3DEnvironment(w, h, particles, camera, celestialWorldX, timePhase, pulsePhase, is2DFallback)
+                            drawVolumetricClouds3D(w, h, clouds.take(3), camera, timePhase, isStorm = false, isNight = true, isSunset = false)
+                        }
+                        WeatherSceneType.CLOUDY -> {
+                            drawAmbientSunGlow(w, h, camX, camY, Color(0xFF7DD3FC).copy(alpha = 0.34f))
+                            drawVolumetricClouds3D(w, h, clouds, camera, timePhase, isStorm = false, isNight = false, isSunset = false)
+                        }
+                        WeatherSceneType.RAINY -> {
+                            drawVolumetricClouds3D(w, h, clouds, camera, timePhase, isStorm = true, isNight = false, isSunset = false)
+                            drawRain3DParticlesAndWetGlass(w, h, particles, camX, camY, timePhase, isHeavyStorm = false, is2DFallback = is2DFallback)
+                        }
+                        WeatherSceneType.THUNDERSTORM -> {
+                            drawLightningAndStormFlash(w, h, camX, camY, timePhase, pulsePhase, reducedMotion)
+                            drawVolumetricClouds3D(w, h, clouds, camera, timePhase, isStorm = true, isNight = false, isSunset = false)
+                            drawRain3DParticlesAndWetGlass(w, h, particles, camX, camY, timePhase, isHeavyStorm = true, is2DFallback = is2DFallback)
+                        }
+                        WeatherSceneType.SNOWY -> {
+                            drawVolumetricClouds3D(w, h, clouds.take(3), camera, timePhase, isStorm = false, isNight = false, isSunset = false)
+                            drawSnow3DEnvironment(w, h, particles, camX, camY, timePhase, is2DFallback)
+                        }
+                        WeatherSceneType.FOGGY -> {
+                            drawVolumetricClouds3D(w, h, clouds.take(3), camera, timePhase, isStorm = false, isNight = false, isSunset = false)
+                            drawFoggy3DLayers(w, h, camX, camY, timePhase, pulsePhase)
+                        }
                     }
                 }
 

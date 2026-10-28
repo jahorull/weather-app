@@ -65,10 +65,14 @@ import com.example.model.BangladeshCrop
 import com.example.model.DefaultGlobalCities
 import com.example.model.PersonalThresholdAlert
 import com.example.model.SavedLocation
+import com.example.model.TimeMachineSlot
+import com.example.model.TwinInterestCategory
+import com.example.model.TwinUserPreference
 import com.example.model.UserSettings
 import com.example.model.WeatherBundle
 import com.example.model.WeatherFormatter
 import com.example.model.WeatherSceneType
+import com.example.model.WhatIfSimulationState
 import com.example.ui.components.AnimatedWeatherConditionIcon
 import com.example.ui.components.FrostedGlassCard
 
@@ -143,6 +147,18 @@ fun AiCopilotScreen(
     onSetAqiThreshold: (Int) -> Unit = {},
     onRequestNotificationPermission: () -> Unit = {},
     onEvaluateAndNotifyNow: () -> Unit = {},
+    whatIfSimulation: WhatIfSimulationState = WhatIfSimulationState(),
+    isProcessingWhatIfCommand: Boolean = false,
+    timeMachineSelectedSlot: TimeMachineSlot? = null,
+    twinPreferences: List<TwinUserPreference> = emptyList(),
+    onUpdateWhatIfParameters: (Float, Float, Float, Float, Float, Float) -> Unit = { _, _, _, _, _, _ -> },
+    onExecuteWhatIfCommand: (String) -> Unit = {},
+    onResetWhatIfSimulation: () -> Unit = {},
+    onSelectTimeMachineSlot: (TimeMachineSlot) -> Unit = {},
+    onExitTimeMachine: () -> Unit = {},
+    onSaveOrUpdateTwinPreference: (String?, TwinInterestCategory, String, String, String) -> Unit = { _, _, _, _, _ -> },
+    onDeleteTwinPreference: (String) -> Unit = {},
+    onResetTwinDefaults: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var promptInput by remember { mutableStateOf("") }
@@ -213,7 +229,7 @@ fun AiCopilotScreen(
                             )
                         }
                         Text(
-                            text = "Atmos AI Copilot & Advisor",
+                            text = "Atmosyn AI Copilot & Advisor",
                             style = MaterialTheme.typography.headlineMedium,
                             color = Color.White
                         )
@@ -488,7 +504,7 @@ fun AiCopilotScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = if (msg.isUser) "YOU" else "ATMOS AI COPILOT",
+                                            text = if (msg.isUser) "YOU" else "ATMOSYN AI COPILOT",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = if (msg.isError) Color(0xFFFCA5A5) else accentColor
                                         )
@@ -1040,7 +1056,7 @@ fun AiCopilotScreen(
 
                     if (alerts.isEmpty()) {
                         Text(
-                            text = "No active official NWS alerts or WMO severe threshold advisories for ${activeLocation.cityName}. Atmos AI never invents warnings when conditions are normal.",
+                            text = "No active official NWS alerts or WMO severe threshold advisories for ${activeLocation.cityName}. Atmosyn AI never invents warnings when conditions are normal.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color.White.copy(alpha = 0.82f)
                         )
@@ -1154,6 +1170,46 @@ fun AiCopilotScreen(
                 onSetAqiThreshold = onSetAqiThreshold,
                 onRequestNotificationPermission = onRequestNotificationPermission,
                 onEvaluateAndNotifyNow = onEvaluateAndNotifyNow
+            )
+        }
+
+        // 11. SIGNATURE FEATURE 1: ATMOS WHAT-IF LAB (3D Weather Experimentation)
+        item {
+            AtmosWhatIfLabCard(
+                whatIfSimulation = whatIfSimulation,
+                isProcessingCommand = isProcessingWhatIfCommand,
+                onUpdateParameters = onUpdateWhatIfParameters,
+                onExecuteWhatIfCommand = onExecuteWhatIfCommand,
+                onResetSimulation = onResetWhatIfSimulation
+            )
+        }
+
+        // 12. SIGNATURE FEATURE 2: ATMOS WEATHER TIME MACHINE
+        item {
+            AtmosTimeMachineCard(
+                activeLocation = activeLocation,
+                weatherBundle = weatherBundle,
+                savedLocations = savedLocations,
+                settings = settings,
+                selectedSlot = timeMachineSelectedSlot,
+                onSelectLocation = onSelectFarmingLocation,
+                onSelectTimeSlot = onSelectTimeMachineSlot,
+                onExitTimeMachine = onExitTimeMachine,
+                onAskAiAboutTimeSlot = { prompt -> onSendCopilotPrompt(prompt) }
+            )
+        }
+
+        // 13. SIGNATURE FEATURE 3: PERSONAL WEATHER TWIN
+        item {
+            PersonalWeatherTwinCard(
+                activeLocation = activeLocation,
+                weatherBundle = weatherBundle,
+                settings = settings,
+                twinPreferences = twinPreferences,
+                onSaveOrUpdatePreference = onSaveOrUpdateTwinPreference,
+                onDeletePreference = onDeleteTwinPreference,
+                onResetDefaultPreferences = onResetTwinDefaults,
+                onAskAiTwinAdvice = { prompt -> onSendCopilotPrompt(prompt) }
             )
         }
     }

@@ -282,12 +282,182 @@ data class WeatherBundle(
     val current: CurrentWeather,
     val hourly: List<HourlyForecast>,
     val daily: List<DailyForecast>,
+    val pastHourly: List<HourlyForecast> = emptyList(),
     val airQuality: AirQualityData? = null,
     val alerts: List<WeatherAlert> = emptyList(),
     val radarTimeline: RadarTimelineBundle? = null,
     val confidenceReport: ForecastConfidenceReport? = null,
     val fetchedAtMillis: Long,
     val isFromCache: Boolean
+)
+
+/**
+ * Signature Feature 1: ATMOS WEATHER TIME MACHINE
+ * Strictly separates Historical Observations, Current Live Observation, Numerical Forecasts,
+ * and Unavailable Periods so the app never invents historical data or guarantees future outcomes.
+ */
+enum class TimeMachinePointType(
+    val badgeLabelEn: String,
+    val badgeLabelBn: String,
+    val colorHex: Long
+) {
+    HISTORICAL_OBSERVATION(
+        badgeLabelEn = "HISTORICAL OBSERVATION",
+        badgeLabelBn = "অতীতের পর্যবেক্ষণ (Observed)",
+        colorHex = 0xFF38BDF8
+    ),
+    CURRENT_OBSERVATION(
+        badgeLabelEn = "CURRENT LIVE OBSERVATION",
+        badgeLabelBn = "বর্তমান লাইভ পর্যবেক্ষণ",
+        colorHex = 0xFF34D399
+    ),
+    FORECAST(
+        badgeLabelEn = "NUMERICAL FORECAST (NOT GUARANTEED)",
+        badgeLabelBn = "পূর্বাভাস (নিশ্চয়তা নয়)",
+        colorHex = 0xFFFBBF24
+    ),
+    UNAVAILABLE_PERIOD(
+        badgeLabelEn = "UNAVAILABLE PERIOD (NO FABRICATED DATA)",
+        badgeLabelBn = "তথ্য অনুপলব্ধ (কোনো কাল্পনিক ডেটা নয়)",
+        colorHex = 0xFF94A3B8
+    )
+}
+
+data class TimeMachineSlot(
+    val id: String,
+    val shortLabel: String,
+    val timestampLabel: String,
+    val pointType: TimeMachinePointType,
+    val temperatureC: Double?,
+    val feelsLikeC: Double?,
+    val precipProbabilityPercent: Int?,
+    val precipitationMm: Double?,
+    val windSpeedKmh: Double?,
+    val humidityPercent: Int?,
+    val uvIndex: Double?,
+    val conditionText: String,
+    val sceneType: WeatherSceneType?,
+    val localHourOfDay: Int,
+    val dataSourceLabel: String,
+    val honestyNoteEn: String,
+    val honestyNoteBn: String
+)
+
+/**
+ * Signature Feature 2: ATMOS WHAT-IF LAB
+ * Validated 3D weather experimentation state. Clearly labeled as a hypothetical visual simulation
+ * that never modifies or predicts real atmospheric telemetry.
+ */
+data class WhatIfSimulationState(
+    val isActive: Boolean = false,
+    val windStrength: Float = 0.35f,      // 0f..1f (visual drift & rain slant)
+    val cloudDensity: Float = 0.40f,      // 0f..1f (volumetric cloud count, scale & opacity)
+    val rainIntensity: Float = 0.0f,      // 0f..1f (3D raindrop streaks & wet-glass ripples)
+    val fogDensity: Float = 0.10f,        // 0f..1f (atmospheric mist & depth veil layers)
+    val sunlightIntensity: Float = 0.80f, // 0f..1f (solar rays, corona bloom & lens flare)
+    val timeOfDayHour: Float = 14.0f,     // 0f..23.5f (solar/lunar elevation & sky gradient)
+    val derivedSceneType: WeatherSceneType = WeatherSceneType.SUNNY,
+    val activeCommandLabel: String? = null,
+    val simulationExplanation: String = "Hypothetical 3D visual simulation — adjust sliders or enter a natural-language command to experiment with the 3D atmosphere."
+) {
+    companion object {
+        fun deriveSceneFromParameters(
+            windStrength: Float,
+            cloudDensity: Float,
+            rainIntensity: Float,
+            fogDensity: Float,
+            sunlightIntensity: Float,
+            timeOfDayHour: Float
+        ): WeatherSceneType {
+            val hr = timeOfDayHour.roundToInt().coerceIn(0, 23)
+            val isSunsetWindow = hr in 17..19 || hr in 5..6
+            val isNightWindow = hr < 5 || hr >= 20
+            return when {
+                rainIntensity >= 0.72f && (windStrength >= 0.60f || cloudDensity >= 0.75f) ->
+                    WeatherSceneType.THUNDERSTORM
+                rainIntensity >= 0.22f ->
+                    WeatherSceneType.RAINY
+                fogDensity >= 0.58f && rainIntensity < 0.22f ->
+                    WeatherSceneType.FOGGY
+                isSunsetWindow && sunlightIntensity >= 0.30f ->
+                    WeatherSceneType.SUNSET
+                isNightWindow ->
+                    WeatherSceneType.NIGHT
+                cloudDensity >= 0.58f && sunlightIntensity < 0.65f ->
+                    WeatherSceneType.CLOUDY
+                else ->
+                    WeatherSceneType.SUNNY
+            }
+        }
+    }
+}
+
+/**
+ * Signature Feature 3: PERSONAL WEATHER TWIN
+ * Local user interest profiles with CRUD support and forecast-grounded explanations.
+ */
+enum class TwinInterestCategory(
+    val id: String,
+    val labelEn: String,
+    val labelBn: String,
+    val defaultWindow: String,
+    val telemetryFocus: String
+) {
+    FARMING(
+        id = "farming",
+        labelEn = "Farming",
+        labelBn = "কৃষি ও চাষাবাদ",
+        defaultWindow = "Morning (06:00–11:00)",
+        telemetryFocus = "Rain probability, precipitation mm, humidity & wind speed"
+    ),
+    OUTDOOR_PHOTOGRAPHY(
+        id = "outdoor_photography",
+        labelEn = "Outdoor Photography",
+        labelBn = "আউটডোর ফটোগ্রাফি",
+        defaultWindow = "Golden Hour (16:30–18:30)",
+        telemetryFocus = "Sunset/sunrise timing, visibility km, cloud texture & wind stability"
+    ),
+    COMMUTING(
+        id = "commuting",
+        labelEn = "Commuting",
+        labelBn = "দৈনিক যাতায়াত",
+        defaultWindow = "Commute Hours (08:00–10:00 & 17:00–20:00)",
+        telemetryFocus = "Hourly rain probability, road visibility & wind gusts"
+    ),
+    EXERCISE(
+        id = "exercise",
+        labelEn = "Exercise",
+        labelBn = "ব্যায়াম ও দৌড়ানো",
+        defaultWindow = "Early Morning / Evening",
+        telemetryFocus = "Feels-like temperature, UV index, humidity & US AQI"
+    ),
+    TRAVEL(
+        id = "travel",
+        labelEn = "Travel",
+        labelBn = "ভ্রমণ ও আউটিং",
+        defaultWindow = "Daytime (09:00–18:00)",
+        telemetryFocus = "7-day temperature range, rain probability & wind outlook"
+    )
+}
+
+data class TwinUserPreference(
+    val id: String,
+    val interest: TwinInterestCategory,
+    val customTitle: String,
+    val preferredWindow: String,
+    val userNote: String,
+    val updatedAtLabel: String
+)
+
+data class TwinRecommendation(
+    val preference: TwinUserPreference,
+    val suitabilityBadge: String,
+    val headlineEn: String,
+    val headlineBn: String,
+    val recommendationEn: String,
+    val recommendationBn: String,
+    val forecastEvidence: String,
+    val safetyBoundaryNote: String = "Recommendation grounded in current forecast telemetry — not a health, medical, or safety guarantee."
 )
 
 /**

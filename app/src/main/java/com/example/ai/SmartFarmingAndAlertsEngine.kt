@@ -28,7 +28,7 @@ import kotlin.math.roundToInt
 object SmartFarmingAndAlertsEngine {
 
     private const val PERSONAL_ALERT_CHANNEL_ID = "atmos_personal_weather_alerts"
-    private const val PERSONAL_ALERT_CHANNEL_NAME = "Atmos Personalized Threshold Alerts"
+    private const val PERSONAL_ALERT_CHANNEL_NAME = "Atmosyn Personalized Threshold Alerts"
 
     /**
      * Generates verified weather-based guidance for the selected location and Bangladesh crop
@@ -218,7 +218,7 @@ object SmartFarmingAndAlertsEngine {
             )
         }
 
-        val expertNoticeEn = "Agronomy & Safety Boundary: Recommendations are strictly weather-timing aids and never guarantee crop outcomes. Atmos 3D never prescribes pesticide or chemical dosages. For pest identification, fertilizer rates, or local salinity/flood advisories, consult your local Upazila Agriculture Office (DAE / কৃষি সম্প্রসারণ অধিদপ্তর) or call 16123."
+        val expertNoticeEn = "Agronomy & Safety Boundary: Recommendations are strictly weather-timing aids and never guarantee crop outcomes. Atmosyn never prescribes pesticide or chemical dosages. For pest identification, fertilizer rates, or local salinity/flood advisories, consult your local Upazila Agriculture Office (DAE / কৃষি সম্প্রসারণ অধিদপ্তর) or call 16123."
         val expertNoticeBn = "কৃষি ও নিরাপত্তা নির্দেশিকা: এই পরামর্শগুলো শুধুমাত্র আবহাওয়া-ভিত্তিক সময় নির্ধারণের সহায়িকা—এটি ফসলের ফলনের কোনো নিশ্চয়তা দেয় না এবং কোনো কীটনাশক বা রাসায়নিকের মাত্রা নির্ধারণ করে না। রোগবালাই দমন ও স্থানীয় কৃষি পরামর্শের জন্য উপজেলা কৃষি অফিস (কৃষি সম্প্রসারণ অধিদপ্তর - DAE) অথবা কৃষি কল সেন্টার ১৬১২৩-এ যোগাযোগ করুন।"
 
         return SmartFarmingAdvisory(

@@ -343,6 +343,35 @@ object WeatherApiMapper {
             0
         }
 
+        val pastHourlyList = mutableListOf<HourlyForecast>()
+        for (idx in 0 until startIndex) {
+            val timeStr = hourlyDto.time.getOrElse(idx) { "" }
+            val hr = extractHourOfDay(timeStr)
+            val hrIsDay = (hourlyDto.isDay?.getOrNull(idx) ?: if (hr in 6..18) 1 else 0) == 1
+            val code = hourlyDto.weatherCode.getOrElse(idx) { currentDto.weatherCode }
+            val scene = WeatherSceneType.fromWmoCode(code, hrIsDay, hr)
+            val hoursAgo = startIndex - idx
+            val label = "-${hoursAgo}h (${formatHourLabel(hr)})"
+            pastHourlyList.add(
+                HourlyForecast(
+                    timeIso = timeStr,
+                    displayHour = label,
+                    temperatureC = hourlyDto.temperature2m.getOrElse(idx) { currentDto.temperature2m },
+                    feelsLikeC = hourlyDto.apparentTemperature.getOrElse(idx) { currentDto.apparentTemperature },
+                    precipProbabilityPercent = hourlyDto.precipitationProbability?.getOrNull(idx),
+                    precipitationMm = hourlyDto.precipitation?.getOrNull(idx) ?: 0.0,
+                    windSpeedKmh = hourlyDto.windSpeed10m.getOrElse(idx) { currentDto.windSpeed10m },
+                    windDirectionDeg = hourlyDto.windDirection10m?.getOrNull(idx) ?: currentDto.windDirection10m,
+                    humidityPercent = hourlyDto.relativeHumidity2m?.getOrNull(idx) ?: currentDto.relativeHumidity2m,
+                    uvIndex = hourlyDto.uvIndex?.getOrNull(idx),
+                    conditionCode = code,
+                    conditionText = WeatherSceneType.conditionLabelFromWmo(code, hrIsDay, hr),
+                    sceneType = scene,
+                    isHistoricalObservation = true
+                )
+            )
+        }
+
         val hourlyList = mutableListOf<HourlyForecast>()
         val maxHours = minOf(24, hourlyDto.time.size - startIndex)
         for (i in 0 until maxHours) {
@@ -476,6 +505,7 @@ object WeatherApiMapper {
             ),
             hourly = hourlyList,
             daily = dailyList,
+            pastHourly = pastHourlyList,
             airQuality = airQualityData,
             alerts = alertsList,
             radarTimeline = radarTimeline,

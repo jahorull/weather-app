@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Atmos 3D"
+rootProject.name = "Atmosyn"
 
 include(":app")
