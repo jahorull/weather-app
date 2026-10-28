@@ -24,35 +24,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: '9.3.1'
-
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install Android SDK packages
         run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
           yes | sdkmanager --licenses
-          sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
-
-      - name: Generate debug signing key
-        run: |
-          keytool -genkeypair -v \
-            -keystore debug.keystore \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
 
       - name: Build APK
-        run: gradle :app:assembleDebug
+        run: |
+          gradle :app:assembleDebug
 
-      - name: Upload APK to GitHub
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: weather-app-debug-apk
