@@ -1,6 +1,6 @@
 {
-  "summary":  "Comprehensive implementation plan for Atmos 3D, a futuristic 3D weather forecast Android application featuring real-time volumetric 3D weather scenes, interactive 3D Earth explorer, live meteorological API integration with offline Room caching, hardware sensor parallax, and glassmorphic Material 3 UI.",
-  "updatedAt":  "2026-10-26T18:14:24.882025207Z",
+  "summary":  "Upgrade plan for Atmos 3D incorporating live Open-Meteo Air Quality (US AQI, PM2.5, PM10), real National Weather Service (NWS) & WMO threshold weather alerts, strict null-vs-zero telemetry distinction, system Reduced Motion accessibility detection, enhanced cubic-bezier interactive forecast charts, and strict live/cached data integrity without mock weather fallbacks.",
+  "updatedAt":  "2026-10-28T07:28:09.720375693Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

@@ -1,76 +1,54 @@
-# Atmos 3D — Futuristic 3D Weather Forecast Android App
+# Atmos 3D — Premium Real-Time Telemetry, Air Quality, Alerts & 3D Accessibility Upgrade
 
-Atmos 3D transforms routine weather checking into a living, interactive 3D atmospheric window. Combining real-time volumetric 3D weather rendering, hardware sensor parallax, an interactive 3D globe explorer, and live meteorological data with offline resilience, the application delivers a cinematic weather experience optimized for smooth performance on mid-range and flagship Android devices.
+This upgrade elevates the existing **Atmos 3D** Android application while preserving its dark glassmorphic visual identity, 6-destination navigation, interactive 3D Earth globe, and `SensorEventListener` 3D camera perspective engine. It adds live **US AQI & Particulate Air Quality**, real **Weather Alerts (NWS API + live WMO meteorological threshold advisories)**, strict **null-vs-zero telemetry handling**, **no-mock-data network/cache integrity**, **system Reduced Motion accessibility detection**, and upgraded **cubic-Bézier interactive forecast charts**.
 
 ### User Review & Critical Decisions
 
 > [!IMPORTANT]
-> Because the initial clarification questions were skipped, we have selected the recommended defaults below so the application works out-of-the-box with zero manual setup while still supporting optional custom API keys via AI Studio Secrets.
+> All three product decisions below incorporate your confirmed selections from the clarification step.
 
-- **Live Weather & Geocoding Engine (Recommended Default)**: Uses the **Open-Meteo Forecast & Geocoding API** as the primary zero-key live provider for immediate out-of-the-box real weather data, alongside built-in support for an optional `WEATHER_API_KEY` (via `BuildConfig` and `.env.example`) for OpenWeatherMap/WeatherAPI.com integration.
-- **3D Rendering & Visual Style (Recommended Default)**: Uses a custom **Volumetric 3D Canvas & Depth-Particle Engine** with 3D perspective projection, multi-layer parallax driven by hardware accelerometer/gyroscope sensors (`SensorManager`) and touch drag gestures, and an adaptive 2D performance mode toggle.
-- **Persistence & Offline Caching (Recommended Default)**: Uses **Room Database** for offline weather snapshot caching and saved favorite locations, paired with **Jetpack DataStore Preferences** for user settings (temperature units, wind speed units, theme mode, animation quality, and auto-refresh interval).
+- **Confirmed Decision 1 — Live Air Quality Telemetry**: Integrates the **Open-Meteo Air Quality API** (`https://air-quality-api.open-meteo.com/v1/air-quality`) to display real-time **US AQI**, **PM2.5**, **PM10**, **Ozone (O₃)**, and **NO₂** with EPA health category badges.
+- **Confirmed Decision 2 — Authentic Weather Alerts**: Queries the live **National Weather Service (NWS) Alerts API** (`https://api.weather.gov/alerts/active?point={lat},{lon}`) for official regional warnings (displaying severity, affected area, issue time, and issuing office/source) and pairs it with **WMO Live Threshold Advisories** triggered strictly when actual live API readings exceed severe thresholds (e.g., WMO code 95–99 thunderstorm, wind ≥ 50 km/h, UV ≥ 8). When no alerts are active, the UI cleanly reports *"No active severe weather alerts"*—never inventing warnings.
+- **Confirmed Decision 3 — Reduced Motion & Low-End Device Optimization**: Automatically detects the Android system's `Settings.Global.ANIMATOR_DURATION_SCALE` accessibility setting and pairs it with a manual **Reduced Motion** switch and **Low-Performance 2D Mode** in Settings to pause/simplify 3D camera tilt, particle velocity, and lightning flashes when enabled.
 
 ---
 
 ### 1. Overview & Core Concept
 
-- **What It Does**: Atmos 3D renders live local and global weather conditions inside an interactive 3D atmospheric viewport. Every weather state—Sunny, Cloudy, Rainy, Thunderstorm, Snowy, Foggy, Sunset, and Night—features distinct 3D depth layers, volumetric lighting, particle physics, and interactive touch/tilt camera movement.
-- **Target Audience / Persona**: Everyday commuters, travelers, and weather enthusiasts who want both immediate, glanceable atmospheric clarity and deep meteorological analytics (hourly/7-day charts, UV index, pressure, visibility, wind vectors, and global regional comparisons).
-- **Key Value**: Bridges cinematic 3D visual immersion with trustworthy, real-time meteorological telemetry, transparent offline cache indicators, and zero-friction city discovery via both search and an interactive 3D Earth globe.
+- **What It Does**: Upgrades the existing Kotlin + Jetpack Compose Atmos 3D app to deliver verifiable meteorological accuracy (Current, 24h Hourly, 7-Day Daily, US AQI Air Quality, and Active Weather Alerts) inside an adaptive 3D atmospheric viewport synchronized with the city's actual local time and weather code.
+- **Preserved Features**: Retains all 6 screens (Weather Dashboard, Forecasts, 3D Globe, Analytics & 3D Studio, Cities, Settings), the `MainActivity` `SensorEventListener` 3D tilt parallax, frosted-glass M3 components, and Room + DataStore persistence.
+- **Key Value**: Guarantees 100% authentic live or explicitly badged cached telemetry (never presenting fabricated mock numbers as live weather), distinguishes missing API fields (`Unavailable`) from `0`, and ensures smooth performance and accessibility across both flagship and low-end Android devices.
 
 ---
 
 ### 2. User Experience & Visual Design
 
-#### Key User Flows
-1. **3D Atmospheric Splash & Onboarding**: Launches with a brief, fluid 3D atmospheric particle vortex and glowing orbital horizon transition into the main dashboard.
-2. **Main Weather Dashboard & Immersive Mode**:
-   - Displays the active city/country header, live vs. cached status badge, last updated timestamp, quick-refresh button, and GPS location button (with an explicit rationale dialog before requesting Android runtime location permissions).
-   - Features the interactive 3D Weather Viewport in the upper/full-bleed hero area (supports device tilt parallax, touch rotation/scrubbing, and a one-tap **Immersive Full-Screen 3D Mode** toggle that hides UI chrome).
-   - Presents frosted-glass telemetry cards: large current temperature, condition label, feels-like, daily High/Low, horizontally scrollable 24-hour strip, and a 2-column grid of compact cards for Humidity, Wind Speed & 3D Compass Direction, UV Index gauge, Visibility, Atmospheric Pressure gauge, and Sunrise/Sunset orbital arc.
-3. **Detailed Forecasts & Interactive Charts (Hourly & 7-Day)**:
-   - Dedicated view with segmented switching and interactive scrubbing across the 24-hour timeline and 7-day outlook.
-   - Interactive temperature curve, precipitation probability bars, wind speed trends, and humidity curve. Tapping any hour or day expands a detailed meteorological breakdown sheet.
-4. **Interactive 3D Earth Globe & City Explorer**:
-   - A draggable, zoomable 3D spherical Earth rendered with latitude/longitude graticules, continental landmass vectors, day/night terminator shading, atmospheric limb glow, and live interactive weather pins for global hubs and user-saved cities.
-   - Tapping any pin or region on the 3D globe previews its live weather and lets the user jump directly to its full 3D environment or save it to favorites.
-5. **Weather Analytics & Scene Studio**:
-   - Deep-dive comparative telemetry (comfort index, dew point, solar radiation arc, barometric trend, wind rose) plus an interactive **3D Atmosphere Preview Switcher** allowing users to inspect all 8 weather scenes (Sunny, Cloudy, Rainy, Thunderstorm, Snowy, Foggy, Sunset, Night) in real time.
-6. **Saved Locations & City Search**:
-   - Live geocoding city search with autocomplete results (city, admin region, country, coordinates), favorite city cards showing cached temperatures and weather condition badges, swipe/tap removal, and default city selection (defaulting to Dhaka, Bangladesh if GPS permission is declined on first launch).
-7. **Settings & Performance Control**:
-   - Instant toggles for Temperature Units (°C / °F), Wind Speed Units (km/h, mph, m/s), Theme Mode (Dynamic Weather Adaptive, Dark, Light), 3D Graphics Quality (High 3D Volumetric, Balanced, 2D Battery-Saver Fallback), Auto-Refresh Interval, and Location Permission status.
-
-#### Visual Identity & Theme
-- **Aesthetic Direction**: *Cinematic Atmospheric Glassmorphism*—deep spatial gradients, translucent frosted surfaces with subtle specular borders, and luminous telemetry accents that dynamically shift palette based on current weather and time of day.
-- **Color Palette & Mood**:
-  - *Sunny / Clear Day*: Deep Cerulean Sky (`#0C4A6E` to `#0284C7`) with Solar Amber accents (`#FBBF24`).
-  - *Sunset / Golden Hour*: Twilight Indigo (`#1E1B4B`) through Warm Crimson-Orange (`#EA580C`) with Rose Gold highlights (`#F472B6`).
-  - *Rainy / Thunderstorm*: Abyssal Slate (`#090D16` to `#1E293B`) with Electric Cyan lightning/rain accents (`#38BDF8`) and Violet storm glow (`#818CF8`).
-  - *Snowy / Foggy*: Glacial Navy (`#0F172A` to `#334155`) with Frost Mint (`#67E8F9`) and Crisp Ice White (`#F8FAFC`).
-  - *Night*: Cosmic Obsidian (`#050811` to `#0F172A`) with Starlight Silver and Lunar Cyan (`#22D3EE`).
-- **Typography & Hierarchy**:
-  - *Display / Hero Temperatures*: **Space Grotesk** (bundled locally via `font-util`) for crisp, geometric, futuristic numerical readouts and city headers.
-  - *Body & Telemetry Labels*: **Plus Jakarta Sans** (bundled locally via `font-util`) for high-legibility metrics, charts, and forecast lists.
-- **Component Styling & Layout**:
-  - Edge-to-edge full-bleed 3D canvas backdrop with safe-area inset padding (`WindowInsets.safeDrawing` and `WindowInsets.navigationBars`).
-  - Translucent frosted cards (`Color.White.copy(alpha = 0.10f)` in dark/atmospheric mode with `1.dp` gradient border strokes) and responsive layout adaptation (`Compact` bottom navigation bar vs. `Expanded` tablet side navigation rail + two-column dashboard).
+#### Key Upgraded User Flows
+1. **Strict Live vs. Cached Telemetry & Retry Flow**:
+   - On launch or city selection, the app fetches live Forecast, Air Quality, and Weather Alerts in parallel.
+   - If the network succeeds, a green **`LIVE API`** badge and exact timestamp (`Updated 11:28 AM · City Local Time`) are shown.
+   - If the network fails and a Room cache snapshot exists for that city, an amber **`CACHED DATA`** banner clearly states when the cached snapshot was saved and provides an immediate **Retry Live Fetch** button.
+   - If the network fails for a brand-new city with no cached data, a dedicated glassmorphic **Connection Error & Retry** state is shown instead of fake weather numbers.
+2. **Air Quality (US AQI, PM2.5, PM10) & Weather Alerts Dashboard Section**:
+   - Adds a dedicated **Air Quality Card** on the Dashboard and Analytics screens displaying the live **US AQI** score, color-coded EPA category (*Good*, *Moderate*, *Unhealthy for Sensitive Groups*, *Unhealthy*, *Very Unhealthy*, *Hazardous*), and individual **PM2.5** and **PM10** (µg/m³) readouts.
+   - Adds a **Weather Alerts Card** displaying any active official NWS alert or WMO live threshold advisory with **Severity Badge**, **Affected Area**, **Issue Time**, **Source**, and expandable description.
+3. **Upgraded Interactive Forecast Charts (24-Hour & 7-Day)**:
+   - Upgrades the 24-hour chart to render a smooth cubic-Bézier temperature curve with glowing gradient fill underneath, direct temperature value callouts, precipitation probability bars, and horizontal drag/tap scrubbing.
+   - Tapping any hour or day updates the inspection card with full telemetry (Temperature, Feels Like, Rain Probability, Wind Speed & Cardinal Direction, Humidity, UV Index, Sunrise/Sunset) and a one-tap button to preview that condition in the 3D viewport.
+4. **Synchronized 3D Atmosphere & Accessibility Controls**:
+   - Synchronizes the 3D sky dome, solar/lunar elevation angle, and volumetric lighting with the selected city's **actual local hour** (`current.time` from API) and WMO weather code.
+   - Respects system **Reduced Motion** (`ANIMATOR_DURATION_SCALE == 0f`) and the in-app **Reduced Motion** toggle by freezing continuous camera sway, disabling bright lightning screen flashes, and minimizing particle motion.
 
 ---
 
 ### 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1: Dual-Engine Live Weather API (Open-Meteo + Optional Secret Key Support)**
-  - *Chosen Approach*: Use Retrofit + Moshi with Open-Meteo's live Weather Forecast and Geocoding endpoints by default while reading `BuildConfig.WEATHER_API_KEY` (configured via `.env.example` and the Secrets Gradle Plugin) to support optional authenticated weather endpoints.
-  - *Why*: Guarantees 100% real, live meteorological data for any city or GPS coordinate immediately upon launch without failing on missing user keys, while strictly fulfilling secure API credential configuration requirements.
-  - *Alternatives Considered*: Requiring a mandatory OpenWeatherMap key before showing data—rejected because an unconfigured key would block live weather functionality on first run.
-- **Decision 2: Custom 3D Projection & Hardware-Accelerated Shader/Canvas Engine**
-  - *Chosen Approach*: Build a dedicated 3D projection, lighting, and particle physics engine in Jetpack Compose Canvas with `SensorEventListener` (accelerometer/gyroscope tilt parallax) and touch-drag camera orbits, plus a 3D spherical globe renderer with 3D-to-2D perspective math and back-face culling.
-  - *Why*: Provides 60fps real-time 3D weather environments (volumetric ray shafts, 3D rain/snow depth particles, wet-glass droplet refraction, lightning arcs, and a rotating 3D Earth) without heavyweight native `.so` engine bloat or compatibility crashes on emulator/mid-range GPUs, and includes an instant 2D fallback mode.
-- **Decision 3: Offline-First Room Cache + DataStore Preferences**
-  - *Chosen Approach*: Persist every fetched city forecast as a serialized JSON snapshot in Room alongside a `lastUpdatedEpochMs` timestamp, and store saved cities and user preferences in Room/DataStore.
-  - *Why*: Enables instant startup, seamless offline browsing with a clear "Cached · Offline" vs. "Live · Updated just now" indicator, and automatic background refresh when connectivity resumes.
+- **Decision 1: Strict Null-vs-Zero Telemetry Representation**
+  - *Chosen Approach*: Represent optional sensor/API metrics (`uvIndex`, `visibilityKm`, `precipProbabilityPercent`, `usAqi`, `pm25`, `pm10`) as nullable types (`Double?` / `Int?`) throughout the DTO and domain layers. Format `null` as `"Unavailable"` and `0` as `"0"` (`0%`, `0.0 km`, `AQI 0`).
+  - *Why*: Prevents misleading users into thinking UV, visibility, or air pollution is zero when an API station omits a reading.
+- **Decision 2: Parallel Non-Blocking API Aggregation**
+  - *Chosen Approach*: Use Kotlin Coroutines `supervisorScope` + `async` inside `WeatherRepository` so that if the secondary Air Quality or NWS Alerts endpoint times out, the primary Open-Meteo Forecast still renders immediately while marking only the failed sub-section as `"Unavailable"`.
+  - *Why*: Ensures fast load times and high resilience without unnecessary retries or full-screen failures.
 
 ---
 
@@ -78,54 +56,38 @@ Atmos 3D transforms routine weather checking into a living, interactive 3D atmos
 
 #### Architecture & Component Diagram
 ```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                        ATMOS 3D PRESENTATION LAYER                         │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────────┐  │
-│  │  3D Weather Hero │  │  Forecast &      │  │  Interactive 3D Earth    │  │
-│  │  Scene Renderer  │  │  Analytics Views │  │  Globe & City Explorer   │  │
-│  │ (8 3D Environments│  │ (24h Strip, 7d   │  │ (3D Sphere Projection,   │  │
-│  │ + Tilt Parallax  │  │  List, Temp/Rain │  │  Day/Night Terminator,   │  │
-│  │ + Immersive Mode)│  │  Interactive     │  │  Live Global City Pins)  │  │
-│  └────────▲─────────┘  │  Charts)         │  └────────────▲─────────────┘  │
-│           │            └────────▲─────────┘               │                │
-│           └─────────────────────┼─────────────────────────┘                │
-│                                 │ StateFlow<AtmosUiState>                  │
-│                        ┌────────┴─────────┐                                │
-│                        │  AtmosViewModel  │                                │
-│                        └────────▲─────────┘                                │
-└─────────────────────────────────┼──────────────────────────────────────────┘
-                                  │
-┌─────────────────────────────────┼──────────────────────────────────────────┐
-│                         DOMAIN & DATA LAYER                                │
-│                        ┌────────┴─────────┐                                │
-│                        │ WeatherRepository│                                │
-│                        └──▲─────▲──────▲──┘                                │
-│                           │     │      │                                   │
-│      ┌────────────────────┘     │      └────────────────────┐              │
-│      ▼                          ▼                           ▼              │
-│ ┌────────────────────┐ ┌──────────────────────┐ ┌────────────────────────┐ │
-│ │  Retrofit + Moshi  │ │  Room Database       │ │  Device Sensors & GPS  │ │
-│ │  Live Weather &    │ │  - SavedLocationDao  │ │  - FusedLocation /     │ │
-│ │  Geocoding APIs    │ │  - WeatherCacheDao   │ │    LocationManager     │ │
-│ │  + BuildConfig Key │ │  + DataStore Prefs   │ │  - Tilt Parallax Sensor│ │
-│ └────────────────────┘ └──────────────────────┘ └────────────────────────┘ │
-└────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                     ATMOS 3D UPGRADED PRESENTATION LAYER                     │
+│  ┌────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐  │
+│  │ 3D Weather Scene   │  │ Upgraded Dashboard   │  │ Interactive Cubic    │  │
+│  │ + Local Time Sync  │  │ + US AQI Air Quality │  │ Charts (24h & 7d)    │  │
+│  │ + Reduced Motion / │  │ + Live Weather Alerts│  │ + Null-Safe Readouts │  │
+│  │   Low-Power Guard  │  │ + Retry & Cache Badge│  │ + 3D Earth Explorer  │  │
+│  └─────────▲──────────┘  └──────────▲───────────┘  └──────────▲───────────┘  │
+│            └────────────────────────┼─────────────────────────┘              │
+│                                     │ StateFlow<AtmosUiState>                │
+│                            ┌────────┴─────────┐                              │
+│                            │  AtmosViewModel  │                              │
+│                            └────────▲─────────┘                              │
+└─────────────────────────────────────┼────────────────────────────────────────┘
+                                      │
+┌─────────────────────────────────────┼────────────────────────────────────────┐
+│                      UPGRADED DOMAIN & DATA LAYER                            │
+│                            ┌────────┴─────────┐                              │
+│                            │ WeatherRepository│                              │
+│                            └──▲─────▲──────▲──┘                              │
+│           ┌───────────────────┘     │      └───────────────────┐             │
+│           ▼                         ▼                          ▼             │
+│ ┌───────────────────────┐ ┌──────────────────────┐ ┌───────────────────────┐ │
+│ │ Open-Meteo Forecast   │ │ Open-Meteo Air       │ │ NWS Active Alerts API │ │
+│ │ + Geocoding API       │ │ Quality API          │ │ (api.weather.gov) +   │ │
+│ │ (Current, 24h, 7d)    │ │ (US AQI, PM2.5, PM10)│ │ WMO Live Thresholds   │ │
+│ └───────────────────────┘ └──────────────────────┘ └───────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### Data Model & State
-- **`WeatherBundle` (Domain Model)**:
-  - `location`: `SavedLocation` (id, cityName, region, country, latitude, longitude, timezone, isCurrentLocation, isFavorite).
-  - `current`: `CurrentWeather` (temperatureC, feelsLikeC, highC, lowC, conditionCode, sceneType: `WeatherSceneType`, humidity, windSpeedKmh, windDirectionDeg, uvIndex, visibilityKm, pressureHpa, sunriseIso, sunsetIso, isDay).
-  - `hourly`: `List<HourlyForecast>` (24 hours: timeIso, tempC, feelsLikeC, precipProbPercent, windSpeedKmh, humidity, conditionCode, sceneType).
-  - `daily`: `List<DailyForecast>` (7 days: dateIso, maxTempC, minTempC, precipProbPercent, maxWindKmh, uvIndexMax, sunriseIso, sunsetIso, conditionCode, sceneType).
-  - `fetchedAtMillis`: Epoch timestamp used to compute relative age and distinguish `isFromCache` vs. live network response.
-- **`WeatherSceneType` (8 Distinct 3D Environments)**:
-  - `SUNNY`, `CLOUDY`, `RAINY`, `THUNDERSTORM`, `SNOWY`, `FOGGY`, `SUNSET`, `NIGHT`.
-- **`UserSettings` (DataStore)**:
-  - `tempUnit` (`CELSIUS` / `FAHRENHEIT`), `windUnit` (`KMH` / `MPH` / `MS`), `themeMode` (`DYNAMIC` / `DARK` / `LIGHT`), `graphicsQuality` (`HIGH_3D` / `BALANCED_3D` / `FALLBACK_2D`), `autoRefreshMinutes` (`15` / `30` / `60` / `OFF`).
-
-#### Interactive Component & State Mapping
-- **Location Rationale & Permission Flow**: Tapping "Detect My Location" checks `ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION`. Before launching the system permission prompt, a glassmorphic rationale modal explains that location is used solely to fetch local atmospheric telemetry. If granted, GPS coordinates are resolved to a city name and live weather is loaded; if denied, the app gracefully falls back to the last active saved city (defaulting to Dhaka, Bangladesh) with an informative banner.
-- **Interactive Forecasts & Detail Inspection**: Tapping any hourly pill or 7-day forecast row opens a rich bottom sheet / detail panel showing hourly curve progressions, wind vector compass, UV safety guidance, and sunrise/sunset solar progress for that specific time window; users can also preview that forecast's 3D weather environment.
-- **3D Globe Interaction**: Dragging across the 3D Earth canvas rotates pitch and yaw angles with inertia; pinch/slider controls zoom; tapping a 3D projected city marker highlights its live weather card and allows instant switching or saving to favorites.
-- **Automated Verification**: Includes JUnit unit tests for unit conversion (°C/°F, km/h/mph/m/s), WMO weather code to `WeatherSceneType` mapping, and offline cache expiration logic, plus Robolectric Compose UI tests verifying dashboard rendering, navigation across all screens, and interactive forecast selection.
+#### Data Model Additions & State Mapping
+- **`AirQualityData`**: `usAqi: Int?`, `pm25: Double?`, `pm10: Double?`, `ozone: Double?`, `nitrogenDioxide: Double?`, `categoryLabel: String`.
+- **`WeatherAlert`**: `id: String`, `headline: String`, `severity: String` (*Extreme*, *Severe*, *Moderate*, *Advisory*), `affectedArea: String`, `issuedAt: String`, `source: String`, `description: String`.
+- **`UserSettings` Additions**: `reducedMotion: Boolean = false` (combined at runtime with Android's system `ANIMATOR_DURATION_SCALE` check).
+- **`WeatherBundle` Additions**: Includes `airQuality: AirQualityData?`, `alerts: List<WeatherAlert>`, `cityLocalTime: String`, and `isFromCache: Boolean`. When no network and no Room cache exist for a city, `AtmosUiState` exposes `hasNoDataError: Boolean` with a one-tap **Retry** handler rather than synthetic weather numbers.

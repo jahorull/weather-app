@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,12 +27,20 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.model.WeatherSceneType
+import com.example.ui.sensor.TiltVector
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+
+/**
+ * Provides the live device tilt/rotation vector from MainActivity's SensorEventListener
+ * to any glass card or interactive 3D button in the composition tree.
+ */
+val LocalDeviceTilt = compositionLocalOf { TiltVector() }
 
 @Composable
 fun FrostedGlassCard(
@@ -39,11 +48,26 @@ fun FrostedGlassCard(
     cornerRadius: Dp = 24.dp,
     containerAlpha: Float = 0.14f,
     accentTint: Color = Color.White,
+    enable3DPerspective: Boolean = true,
     content: @Composable BoxScope.() -> Unit
 ) {
+    val tilt = LocalDeviceTilt.current
     val shape = RoundedCornerShape(cornerRadius)
+    val perspectiveModifier = if (enable3DPerspective) {
+        Modifier.graphicsLayer {
+            rotationX = (tilt.pitch * 4.5f).coerceIn(-7f, 7f)
+            rotationY = (tilt.roll * 5.5f).coerceIn(-8f, 8f)
+            translationX = tilt.roll * 7f
+            translationY = -tilt.pitch * 6f
+            cameraDistance = 16f * density
+        }
+    } else {
+        Modifier
+    }
+
     Box(
         modifier = modifier
+            .then(perspectiveModifier)
             .clip(shape)
             .background(
                 brush = Brush.verticalGradient(
@@ -57,7 +81,7 @@ fun FrostedGlassCard(
                 width = 1.dp,
                 brush = Brush.linearGradient(
                     colors = listOf(
-                        accentTint.copy(alpha = 0.36f),
+                        accentTint.copy(alpha = 0.38f),
                         Color.White.copy(alpha = 0.08f)
                     )
                 ),
@@ -303,7 +327,6 @@ fun SolarHorizonArc(
             style = Stroke(width = 4f, cap = StrokeCap.Round)
         )
 
-        // Sun orb position on the arc
         val angleRad = (180.0 + sweep) * PI / 180.0
         val rx = arcRectSize.width / 2f
         val ry = arcRectSize.height / 2f

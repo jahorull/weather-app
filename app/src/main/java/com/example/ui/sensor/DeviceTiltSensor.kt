@@ -1,71 +1,66 @@
 package com.example.ui.sensor
 
-import android.content.Context
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.State
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 
+/**
+ * 3D orientation & camera perspective state derived from hardware rotation/tilt sensors
+ * (SensorEventListener in MainActivity) combined with interactive touch gestures.
+ */
 data class TiltVector(
-    val pitch: Float = 0f,
-    val roll: Float = 0f
+    val pitch: Float = 0f,   // X-axis tilt (-1f..1f, normalized from radians)
+    val roll: Float = 0f,    // Y-axis tilt (-1f..1f, normalized from radians)
+    val azimuth: Float = 0f  // Z-axis yaw/heading (-1f..1f, normalized from radians)
 )
 
 /**
- * Listens to hardware accelerometer / gravity sensors to provide smooth 3D parallax
- * when the user tilts or moves their Android device. Gracefully returns (0f, 0f)
- * on devices or test environments without hardware motion sensors.
+ * Modifier that applies real-time 3D camera perspective tilt and interactive 3D movable offset
+ * to buttons and frosted glass cards based on device sensor tilt and finger drag.
  */
 @Composable
-fun rememberDeviceTiltState(enabled: Boolean = true): State<TiltVector> {
-    val context = LocalContext.current
-    val tiltState = remember { mutableStateOf(TiltVector()) }
+fun Modifier.interactive3DTilt(
+    tiltVector: TiltVector = TiltVector(),
+    maxRotationDeg: Float = 9f,
+    parallaxTranslationPx: Float = 12f,
+    enableDragMove: Boolean = false
+): Modifier {
+    var dragOffsetX by remember { mutableFloatStateOf(0f) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
 
-    DisposableEffect(context, enabled) {
-        if (!enabled) {
-            onDispose { }
-        } else {
-            val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-            val sensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GRAVITY)
-                ?: sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-
-            val listener = object : SensorEventListener {
-                private var smoothedRoll = 0f
-                private var smoothedPitch = 0f
-
-                override fun onSensorChanged(event: SensorEvent?) {
-                    val values = event?.values ?: return
-                    if (values.size >= 2) {
-                        val rawRoll = (values[0] / 9.81f).coerceIn(-1f, 1f)
-                        val rawPitch = ((values[1] - 4.5f) / 9.81f).coerceIn(-1f, 1f)
-                        smoothedRoll += (rawRoll - smoothedRoll) * 0.12f
-                        smoothedPitch += (rawPitch - smoothedPitch) * 0.12f
-                        tiltState.value = TiltVector(pitch = smoothedPitch, roll = smoothedRoll)
-                    }
+    val dragModifier = if (enableDragMove) {
+        Modifier.pointerInput(Unit) {
+            detectDragGestures(
+                onDragEnd = {
+                    // Smoothly spring back toward center while keeping subtle offset
+                    dragOffsetX *= 0.35f
+                    dragOffsetY *= 0.35f
                 }
-
-                override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
-            }
-
-            if (sensorManager != null && sensor != null) {
-                sensorManager.registerListener(
-                    listener,
-                    sensor,
-                    SensorManager.SENSOR_DELAY_GAME
-                )
-            }
-
-            onDispose {
-                sensorManager?.unregisterListener(listener)
+            ) { change, dragAmount ->
+                change.consume()
+                dragOffsetX = (dragOffsetX + dragAmount.x).coerceIn(-48f, 48f)
+                dragOffsetY = (dragOffsetY + dragAmount.y).coerceIn(-36f, 36f)
             }
         }
+    } else {
+        Modifier
     }
 
-    return tiltState
+    return this
+        .then(dragModifier)
+        .graphicsLayer {
+            val combinedRoll = (tiltVector.roll + (dragOffsetX / 60f)).coerceIn(-1.2f, 1.2f)
+            val combinedPitch = (tiltVector.pitch - (dragOffsetY / 60f)).coerceIn(-1.2f, 1.2f)
+            rotationY = combinedRoll * maxRotationDeg
+            rotationX = combinedPitch * maxRotationDeg
+            translationX = (tiltVector.roll * parallaxTranslationPx) + dragOffsetX
+            translationY = (-tiltVector.pitch * parallaxTranslationPx) + dragOffsetY
+            cameraDistance = 14f * density
+        }
 }

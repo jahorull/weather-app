@@ -33,6 +33,8 @@ data class SavedLocationEntity(
 data class WeatherCacheEntity(
     @PrimaryKey val locationId: String,
     val rawResponseJson: String,
+    val rawAirQualityJson: String? = null,
+    val rawAlertsJson: String? = null,
     val fetchedAtMillis: Long
 )
 
@@ -68,7 +70,7 @@ interface WeatherCacheDao {
 
 @Database(
     entities = [SavedLocationEntity::class, WeatherCacheEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AtmosDatabase : RoomDatabase() {

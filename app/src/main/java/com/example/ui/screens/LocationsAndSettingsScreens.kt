@@ -17,9 +17,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccessibilityNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material3.Button
@@ -49,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.BuildConfig
 import com.example.R
@@ -64,7 +66,7 @@ import com.example.ui.components.AnimatedWeatherConditionIcon
 import com.example.ui.components.FrostedGlassCard
 
 /**
- * Screen 7: Saved Locations & Live City Search Screen.
+ * Screen 7: Saved Locations & Live City Search Screen with explicit empty/not-found feedback.
  */
 @Composable
 fun SavedLocationsScreen(
@@ -73,6 +75,7 @@ fun SavedLocationsScreen(
     searchQuery: String,
     searchResults: List<SavedLocation>,
     isSearching: Boolean,
+    searchErrorMessage: String?,
     settings: UserSettings,
     onSearchQueryChange: (String) -> Unit,
     onSelectCity: (SavedLocation) -> Unit,
@@ -177,7 +180,7 @@ fun SavedLocationsScreen(
             )
         }
 
-        // Live Geocoding Search Results
+        // Live Geocoding Search Results & Clear Not-Found Feedback
         if (searchQuery.trim().length >= 2) {
             item {
                 Text(
@@ -186,6 +189,46 @@ fun SavedLocationsScreen(
                     color = Color(0xFF38BDF8)
                 )
             }
+
+            if (!isSearching && searchResults.isEmpty()) {
+                item {
+                    FrostedGlassCard(
+                        cornerRadius = 20.dp,
+                        accentTint = Color(0xFFFBBF24),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("city_not_found_card")
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SearchOff,
+                                contentDescription = null,
+                                tint = Color(0xFFFBBF24),
+                                modifier = Modifier.size(34.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = searchErrorMessage
+                                    ?: "No city found matching \"${searchQuery.trim()}\".",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Check the spelling or search by a major city or regional name.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White.copy(alpha = 0.72f),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+
             items(searchResults, key = { "search_${it.id}" }) { resultCity ->
                 val alreadySaved = savedLocations.any {
                     it.cityName.equals(resultCity.cityName, ignoreCase = true) &&
@@ -312,13 +355,11 @@ fun SavedLocationsScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = Color.White.copy(alpha = 0.72f)
                             )
-                            city.cachedCondition?.let { cond ->
-                                Text(
-                                    text = cond,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = accent
-                                )
-                            }
+                            Text(
+                                text = city.cachedCondition ?: "Tap to fetch live weather",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = accent
+                            )
                         }
                     }
 
@@ -352,17 +393,19 @@ fun SavedLocationsScreen(
 }
 
 /**
- * Screen 8: Settings Screen for Units, Themes, 3D Animation Quality, Location Permissions,
- * Auto-Refresh Interval, and API Key / Build Status.
+ * Screen 8: Settings Screen for Units, Themes, 3D Animation Quality, Reduced Motion Accessibility,
+ * Location Permissions, Auto-Refresh Interval, and API Key / Build Status.
  */
 @Composable
 fun SettingsScreen(
     settings: UserSettings,
+    systemReducedMotionDetected: Boolean,
     hasLocationPermission: Boolean,
     onTempUnitChange: (TempUnit) -> Unit,
     onWindUnitChange: (WindUnit) -> Unit,
     onThemeModeChange: (ThemeMode) -> Unit,
     onGraphicsQualityChange: (GraphicsQuality) -> Unit,
+    onReducedMotionChange: (Boolean) -> Unit,
     onAutoRefreshChange: (Int) -> Unit,
     onNotificationsChange: (Boolean) -> Unit,
     onRequestLocationPermission: () -> Unit,
@@ -461,18 +504,18 @@ fun SettingsScreen(
             }
         }
 
-        // 3. 3D Rendering & Animation Quality (Includes 2D Fallback Mode)
+        // 3. 3D Rendering, Low-Performance Mode & Reduced Motion Accessibility
         item {
             FrostedGlassCard {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = "3D RENDERING & BATTERY OPTIMIZATION",
+                        text = "3D RENDERING, ACCESSIBILITY & LOW-END DEVICE MODE",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF38BDF8)
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Select 2D Battery Saver on lower-end devices to disable 3D ray shafts and depth particles.",
+                        text = "Select Low-End 2D Mode on older devices to reduce particles and disable 3D ray shafts.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color.White.copy(alpha = 0.72f)
                     )
@@ -489,6 +532,46 @@ fun SettingsScreen(
                                     .testTag("graphics_quality_${quality.name.lowercase()}")
                             )
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccessibilityNew,
+                                contentDescription = null,
+                                tint = Color(0xFF38BDF8)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Reduced Motion Mode",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = if (systemReducedMotionDetected) {
+                                        "System Animator Scale is OFF (Auto-activated)"
+                                    } else {
+                                        "Freeze 3D tilt sway, lightning flashes & continuous motion"
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color.White.copy(alpha = 0.68f)
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = settings.reducedMotion || systemReducedMotionDetected,
+                            onCheckedChange = onReducedMotionChange,
+                            modifier = Modifier.testTag("reduced_motion_switch")
+                        )
                     }
                 }
             }
@@ -563,7 +646,7 @@ fun SettingsScreen(
                                     color = Color.White
                                 )
                                 Text(
-                                    text = "Notify on thunderstorm or UV spikes",
+                                    text = "Highlight active NWS & WMO threshold warnings",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = Color.White.copy(alpha = 0.68f)
                                 )
@@ -641,7 +724,7 @@ fun SettingsScreen(
                             text = if (customKeyConfigured) {
                                 "Weather API: Custom Secret Key Active (BuildConfig.WEATHER_API_KEY)"
                             } else {
-                                "Weather API: Live Open-Meteo Telemetry Active (Optional WEATHER_API_KEY supported via AI Studio Secrets panel)"
+                                "Weather API: Live Open-Meteo Forecast, Air Quality & NWS Alerts Active (Optional WEATHER_API_KEY supported via AI Studio Secrets panel)"
                             },
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color.White.copy(alpha = 0.82f)

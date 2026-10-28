@@ -89,7 +89,7 @@ enum class WeatherSceneType(
 
     companion object {
         /**
-         * Maps WMO weather interpretation codes and time-of-day into the 8 3D weather scenes.
+         * Maps WMO weather interpretation codes and local time-of-day into the 8 3D weather scenes.
          */
         fun fromWmoCode(
             wmoCode: Int,
@@ -158,7 +158,7 @@ enum class ThemeMode(val label: String) {
 enum class GraphicsQuality(val label: String, val particleMultiplier: Float) {
     HIGH_3D("Ultra 3D Volumetric", 1.0f),
     BALANCED_3D("Balanced 3D (60 FPS)", 0.6f),
-    FALLBACK_2D("2D Battery Saver", 0.25f)
+    FALLBACK_2D("Low-End 2D Mode", 0.25f)
 }
 
 data class UserSettings(
@@ -166,9 +166,17 @@ data class UserSettings(
     val windUnit: WindUnit = WindUnit.KMH,
     val themeMode: ThemeMode = ThemeMode.DYNAMIC,
     val graphicsQuality: GraphicsQuality = GraphicsQuality.HIGH_3D,
+    val reducedMotion: Boolean = false,
     val autoRefreshMinutes: Int = 30,
     val notificationsEnabled: Boolean = true,
-    val activeLocationId: String = "dhaka_bd"
+    val activeLocationId: String = "dhaka_bd",
+    // Personalized Weather Alert Thresholds
+    val personalizedAlertsEnabled: Boolean = true,
+    val rainAlertThresholdPercent: Int = 60,
+    val tempAlertThresholdC: Int = 35,
+    val windAlertThresholdKmh: Int = 40,
+    val aqiAlertThresholdUs: Int = 100,
+    val monitorAllFavoriteCities: Boolean = true
 )
 
 data class SavedLocation(
@@ -186,6 +194,32 @@ data class SavedLocation(
     val cachedSceneType: WeatherSceneType? = null
 )
 
+/**
+ * Live Air Quality telemetry from Open-Meteo Air Quality API.
+ * Nullable fields explicitly distinguish unavailable station readings from 0.
+ */
+data class AirQualityData(
+    val usAqi: Int?,
+    val pm25: Double?,
+    val pm10: Double?,
+    val ozone: Double?,
+    val nitrogenDioxide: Double?
+)
+
+/**
+ * Real Weather Alert from National Weather Service (NWS) or live WMO meteorological thresholds.
+ */
+data class WeatherAlert(
+    val id: String,
+    val headline: String,
+    val severity: String,
+    val affectedArea: String,
+    val issuedAt: String,
+    val expiresAt: String = "Until conditions improve",
+    val source: String,
+    val description: String
+)
+
 data class CurrentWeather(
     val temperatureC: Double,
     val feelsLikeC: Double,
@@ -194,16 +228,19 @@ data class CurrentWeather(
     val conditionCode: Int,
     val conditionText: String,
     val sceneType: WeatherSceneType,
-    val humidityPercent: Int,
+    val humidityPercent: Int?,
     val windSpeedKmh: Double,
-    val windDirectionDeg: Int,
-    val uvIndex: Double,
-    val visibilityKm: Double,
-    val pressureHpa: Double,
+    val windDirectionDeg: Int?,
+    val precipProbabilityPercent: Int?,
+    val uvIndex: Double?,
+    val visibilityKm: Double?,
+    val pressureHpa: Double?,
     val sunriseTime: String,
     val sunsetTime: String,
     val isDay: Boolean,
-    val dewPointC: Double = (temperatureC - ((100 - humidityPercent) / 5.0))
+    val localHourOfDay: Int = 12,
+    val cityLocalTimeLabel: String = "",
+    val dewPointC: Double? = humidityPercent?.let { temperatureC - ((100 - it) / 5.0) }
 )
 
 data class HourlyForecast(
@@ -211,13 +248,16 @@ data class HourlyForecast(
     val displayHour: String,
     val temperatureC: Double,
     val feelsLikeC: Double,
-    val precipProbabilityPercent: Int,
+    val precipProbabilityPercent: Int?,
+    val precipitationMm: Double = 0.0,
     val windSpeedKmh: Double,
-    val humidityPercent: Int,
-    val uvIndex: Double,
+    val windDirectionDeg: Int? = null,
+    val humidityPercent: Int?,
+    val uvIndex: Double?,
     val conditionCode: Int,
     val conditionText: String,
-    val sceneType: WeatherSceneType
+    val sceneType: WeatherSceneType,
+    val isHistoricalObservation: Boolean = false
 )
 
 data class DailyForecast(
@@ -226,10 +266,10 @@ data class DailyForecast(
     val shortDate: String,
     val maxTempC: Double,
     val minTempC: Double,
-    val precipProbabilityPercent: Int,
+    val precipProbabilityPercent: Int?,
     val maxWindSpeedKmh: Double,
-    val uvIndexMax: Double,
-    val humidityAvgPercent: Int,
+    val uvIndexMax: Double?,
+    val humidityAvgPercent: Int?,
     val sunriseTime: String,
     val sunsetTime: String,
     val conditionCode: Int,
@@ -242,12 +282,194 @@ data class WeatherBundle(
     val current: CurrentWeather,
     val hourly: List<HourlyForecast>,
     val daily: List<DailyForecast>,
+    val airQuality: AirQualityData? = null,
+    val alerts: List<WeatherAlert> = emptyList(),
+    val radarTimeline: RadarTimelineBundle? = null,
+    val confidenceReport: ForecastConfidenceReport? = null,
     val fetchedAtMillis: Long,
     val isFromCache: Boolean
 )
 
 /**
+ * Feature 1: AI Rain Radar Frame & Timeline Bundle.
+ * Strictly separates historical radar/precipitation observations (`isHistoricalObservation = true`)
+ * from numerical/nowcast forecast layers (`isHistoricalObservation = false`).
+ */
+data class RadarFrame(
+    val index: Int,
+    val timeIso: String,
+    val displayTimeLabel: String,
+    val relativeOffsetLabel: String,
+    val isHistoricalObservation: Boolean,
+    val precipitationMm: Double?,
+    val precipProbabilityPercent: Int?,
+    val windSpeedKmh: Double,
+    val windDirectionDeg: Int,
+    val conditionCode: Int,
+    val conditionLabel: String,
+    val rainViewerTilePath: String? = null,
+    val dataSourceLabel: String
+)
+
+data class RadarTimelineBundle(
+    val locationName: String,
+    val latitude: Double,
+    val longitude: Double,
+    val frames: List<RadarFrame>,
+    val rainViewerHost: String? = null,
+    val rainViewerGeneratedAtUnix: Long? = null,
+    val hasRainViewerComposite: Boolean = false,
+    val coverageNote: String,
+    val fetchedAtMillis: Long
+)
+
+/**
+ * Feature 2: Multi-Model Forecast Confidence Analyzer.
+ * Compares ECMWF IFS, NOAA GFS, and DWD ICON models without inventing confidence percentages.
+ */
+enum class AgreementLevel(val labelEn: String, val labelBn: String, val colorHex: Long) {
+    HIGH("High Model Agreement (Low Spread)", "মডেলগুলোর মধ্যে উচ্চ মিল (কম পার্থক্য)", 0xFF34D399),
+    MODERATE("Moderate Model Agreement", "মডেলগুলোর মধ্যে মাঝারি মিল", 0xFFFBBF24),
+    LOW("Significant Model Disagreement (High Uncertainty)", "মডেলগুলোর মধ্যে উল্লেখযোগ্য অমিল (অনিশ্চয়তা বেশি)", 0xFFEF4444)
+}
+
+data class ModelDailyEntry(
+    val modelName: String,
+    val maxTempC: Double?,
+    val minTempC: Double?,
+    val precipProbPercent: Int?,
+    val maxWindKmh: Double?
+)
+
+data class DayModelComparison(
+    val dateIso: String,
+    val dayLabel: String,
+    val models: List<ModelDailyEntry>,
+    val maxTempSpreadC: Double?,
+    val precipSpreadPercent: Int?,
+    val windSpreadKmh: Double?,
+    val agreementLevel: AgreementLevel,
+    val explanationEn: String,
+    val explanationBn: String
+)
+
+data class ForecastConfidenceReport(
+    val locationName: String,
+    val observedSummaryEn: String,
+    val observedSummaryBn: String,
+    val dailyComparisons: List<DayModelComparison>,
+    val overallAgreement: AgreementLevel,
+    val overallSummaryEn: String,
+    val overallSummaryBn: String,
+    val dataSourcesLabel: String = "Open-Meteo Multi-Model API (ECMWF IFS 0.25° · NOAA GFS Seamless · DWD ICON Seamless)",
+    val fetchedAtMillis: Long
+)
+
+/**
+ * Feature 3: Bangladesh Smart Farming Mode (Krishi Weather Intelligence).
+ */
+enum class BangladeshCrop(
+    val id: String,
+    val nameEn: String,
+    val nameBn: String,
+    val idealTempRangeC: ClosedFloatingPointRange<Double>,
+    val dryingHumidityCeilingPercent: Int,
+    val sensitivityNoteEn: String,
+    val sensitivityNoteBn: String
+) {
+    AMAN_BORO_RICE(
+        id = "rice",
+        nameEn = "Aman / Boro Rice",
+        nameBn = "ধান (আমন / বোরো)",
+        idealTempRangeC = 22.0..34.0,
+        dryingHumidityCeilingPercent = 72,
+        sensitivityNoteEn = "Sensitive to standing water during harvest and high wind (>35 km/h) lodging during grain filling.",
+        sensitivityNoteBn = "পাকা ধান কাটার সময় অতিবৃষ্টি ও ঘণ্টায় ৩৫ কি.মি.-এর বেশি বাতাসে ধানের গাছ হেলে পড়ার ঝুঁকি থাকে।"
+    ),
+    JUTE(
+        id = "jute",
+        nameEn = "Jute",
+        nameBn = "পাট",
+        idealTempRangeC = 24.0..36.0,
+        dryingHumidityCeilingPercent = 75,
+        sensitivityNoteEn = "Requires warm humid growth conditions, clear sunny windows for fiber drying after retting, and low wind during tall stalk stage.",
+        sensitivityNoteBn = "পাট জাগ দেওয়া ও আঁশ শুকানোর জন্য রোদেলা আবহাওয়া এবং কম বৃষ্টির সময়কাল প্রয়োজন।"
+    ),
+    POTATO(
+        id = "potato",
+        nameEn = "Potato",
+        nameBn = "আলু",
+        idealTempRangeC = 15.0..26.0,
+        dryingHumidityCeilingPercent = 70,
+        sensitivityNoteEn = "Cool dry weather favors tuber growth; persistent fog, high humidity (>82%), and unseasonal rain increase late blight risk.",
+        sensitivityNoteBn = "ঘন কুয়াশা, অতিরিক্ত আর্দ্রতা (>৮২%) ও অসময়ের বৃষ্টিতে আলুর মড়ক বা লেট ব্লাইট রোগের ঝুঁকি বাড়ে।"
+    ),
+    MANGO_ORCHARD(
+        id = "mango",
+        nameEn = "Mango & Orchard",
+        nameBn = "আম ও ফল বাগান",
+        idealTempRangeC = 24.0..36.0,
+        dryingHumidityCeilingPercent = 70,
+        sensitivityNoteEn = "Rain or dense fog during flowering/fruiting and Kalbaishakhi squalls (>40 km/h) can cause fruit drop.",
+        sensitivityNoteBn = "আমের মুকুল বা গুটি অবস্থায় বৃষ্টি/কুয়াশা এবং কালবৈশাখী ঝড়ো বাতাসে (>৪০ কি.মি./ঘণ্টা) ফল ঝরে পড়ার আশঙ্কা থাকে।"
+    ),
+    WHEAT_MAIZE(
+        id = "wheat_maize",
+        nameEn = "Wheat & Maize",
+        nameBn = "গম ও ভুট্টা",
+        idealTempRangeC = 18.0..32.0,
+        dryingHumidityCeilingPercent = 68,
+        sensitivityNoteEn = "Requires well-drained soil; avoid irrigation before forecasted rain to prevent root waterlogging.",
+        sensitivityNoteBn = "জলাবদ্ধতা সহ্য করতে পারে না; বৃষ্টির পূর্বাভাস থাকলে সেচ দেওয়া থেকে বিরত থাকা প্রয়োজন।"
+    ),
+    VEGETABLES_MUSTARD(
+        id = "vegetables_mustard",
+        nameEn = "Vegetables & Mustard",
+        nameBn = "শাকসবজি ও সরিষা",
+        idealTempRangeC = 16.0..30.0,
+        dryingHumidityCeilingPercent = 72,
+        sensitivityNoteEn = "Heavy rain damages delicate blooms and leafy crops; morning low-wind windows are best for field care.",
+        sensitivityNoteBn = "ভারী বৃষ্টিতে সরিষার ফুল ও সবজি খেত ক্ষতিগ্রস্ত হতে পারে; সকালবেলা কম বাতাসে পরিচর্যা করা উত্তম।"
+    )
+}
+
+data class SmartFarmingAdvisory(
+    val location: SavedLocation,
+    val crop: BangladeshCrop,
+    val isDataAvailable: Boolean,
+    val rainfallGuidanceEn: String,
+    val rainfallGuidanceBn: String,
+    val irrigationGuidanceEn: String,
+    val irrigationGuidanceBn: String,
+    val dryingGuidanceEn: String,
+    val dryingGuidanceBn: String,
+    val outdoorActivityWindowsEn: String,
+    val outdoorActivityWindowsBn: String,
+    val uncertaintyExplanationEn: String,
+    val uncertaintyExplanationBn: String,
+    val expertGuidanceNoticeEn: String,
+    val expertGuidanceNoticeBn: String,
+    val updateTimestampLabel: String
+)
+
+/**
+ * Feature 4: Personalized User Threshold Alert (Distinct from Official NWS/WMO Alerts).
+ */
+data class PersonalThresholdAlert(
+    val id: String,
+    val locationName: String,
+    val metricCategory: String,
+    val triggeredValueLabel: String,
+    val thresholdValueLabel: String,
+    val messageEn: String,
+    val messageBn: String,
+    val evaluatedAtLabel: String,
+    val sourceBadge: String = "Personalized User Threshold · Not an Official Government Warning"
+)
+
+/**
  * Pure conversion & meteorological formatting utilities (tested by unit tests).
+ * Strictly distinguishes null ("Unavailable") from 0 ("0").
  */
 object WeatherFormatter {
 
@@ -283,6 +505,26 @@ object WeatherFormatter {
         return directions[index]
     }
 
+    fun formatNullablePercent(value: Int?): String {
+        return if (value == null) "Unavailable" else "$value%"
+    }
+
+    fun formatNullableUv(uv: Double?): String {
+        return if (uv == null) "Unavailable" else "${String.format("%.1f", uv)} · ${uvCategoryLabel(uv)}"
+    }
+
+    fun formatNullableVisibility(visibilityKm: Double?): String {
+        return if (visibilityKm == null) "Unavailable" else "${String.format("%.1f", visibilityKm)} km"
+    }
+
+    fun formatNullablePressure(pressureHpa: Double?): String {
+        return if (pressureHpa == null) "Unavailable" else "${pressureHpa.roundToInt()} hPa"
+    }
+
+    fun formatNullablePollutant(value: Double?, unit: String = "µg/m³"): String {
+        return if (value == null) "Unavailable" else "${String.format("%.1f", value)} $unit"
+    }
+
     fun uvCategoryLabel(uv: Double): String {
         return when {
             uv < 3.0 -> "Low"
@@ -293,7 +535,32 @@ object WeatherFormatter {
         }
     }
 
-    fun humidityComfortLabel(humidity: Int): String {
+    fun aqiCategoryLabel(usAqi: Int?): String {
+        if (usAqi == null) return "Unavailable"
+        return when {
+            usAqi <= 50 -> "Good"
+            usAqi <= 100 -> "Moderate"
+            usAqi <= 150 -> "Sensitive Groups"
+            usAqi <= 200 -> "Unhealthy"
+            usAqi <= 300 -> "Very Unhealthy"
+            else -> "Hazardous"
+        }
+    }
+
+    fun aqiColorHex(usAqi: Int?): Long {
+        if (usAqi == null) return 0xFF94A3B8
+        return when {
+            usAqi <= 50 -> 0xFF34D399
+            usAqi <= 100 -> 0xFFFBBF24
+            usAqi <= 150 -> 0xFFFB923C
+            usAqi <= 200 -> 0xFFF87171
+            usAqi <= 300 -> 0xFFC084FC
+            else -> 0xFFEF4444
+        }
+    }
+
+    fun humidityComfortLabel(humidity: Int?): String {
+        if (humidity == null) return "Sensor Unavailable"
         return when {
             humidity < 30 -> "Dry Air"
             humidity <= 60 -> "Optimal Comfort"
@@ -302,7 +569,8 @@ object WeatherFormatter {
         }
     }
 
-    fun pressureTrendLabel(pressureHpa: Double): String {
+    fun pressureTrendLabel(pressureHpa: Double?): String {
+        if (pressureHpa == null) return "Barometer Unavailable"
         return when {
             pressureHpa < 1005.0 -> "Low Pressure System"
             pressureHpa <= 1020.0 -> "Standard Atmospheric"
@@ -311,6 +579,7 @@ object WeatherFormatter {
     }
 
     fun formatRelativeUpdateTime(fetchedAtMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
+        if (fetchedAtMillis <= 0L) return "Awaiting live sync"
         val diffSeconds = ((nowMillis - fetchedAtMillis) / 1000L).coerceAtLeast(0L)
         return when {
             diffSeconds < 45 -> "Updated just now"
@@ -321,6 +590,10 @@ object WeatherFormatter {
     }
 }
 
+/**
+ * Geographic directory of global cities with real coordinates and timezones.
+ * Note: cachedTempC and cachedCondition default to null until populated by live API responses.
+ */
 object DefaultGlobalCities {
     val hubs = listOf(
         SavedLocation(
@@ -330,10 +603,7 @@ object DefaultGlobalCities {
             country = "Bangladesh",
             latitude = 23.8103,
             longitude = 90.4125,
-            timezone = "Asia/Dhaka",
-            cachedTempC = 28.0,
-            cachedCondition = "Partly Cloudy",
-            cachedSceneType = WeatherSceneType.CLOUDY
+            timezone = "Asia/Dhaka"
         ),
         SavedLocation(
             id = "tokyo_jp",
@@ -342,10 +612,7 @@ object DefaultGlobalCities {
             country = "Japan",
             latitude = 35.6762,
             longitude = 139.6503,
-            timezone = "Asia/Tokyo",
-            cachedTempC = 19.0,
-            cachedCondition = "Clear Night",
-            cachedSceneType = WeatherSceneType.NIGHT
+            timezone = "Asia/Tokyo"
         ),
         SavedLocation(
             id = "london_uk",
@@ -354,10 +621,7 @@ object DefaultGlobalCities {
             country = "United Kingdom",
             latitude = 51.5074,
             longitude = -0.1278,
-            timezone = "Europe/London",
-            cachedTempC = 14.0,
-            cachedCondition = "Rain Showers",
-            cachedSceneType = WeatherSceneType.RAINY
+            timezone = "Europe/London"
         ),
         SavedLocation(
             id = "new_york_us",
@@ -366,10 +630,7 @@ object DefaultGlobalCities {
             country = "United States",
             latitude = 40.7128,
             longitude = -74.0060,
-            timezone = "America/New_York",
-            cachedTempC = 22.0,
-            cachedCondition = "Sunny",
-            cachedSceneType = WeatherSceneType.SUNNY
+            timezone = "America/New_York"
         ),
         SavedLocation(
             id = "reykjavik_is",
@@ -378,10 +639,7 @@ object DefaultGlobalCities {
             country = "Iceland",
             latitude = 64.1466,
             longitude = -21.9426,
-            timezone = "Atlantic/Reykjavik",
-            cachedTempC = -1.0,
-            cachedCondition = "Snowfall",
-            cachedSceneType = WeatherSceneType.SNOWY
+            timezone = "Atlantic/Reykjavik"
         ),
         SavedLocation(
             id = "singapore_sg",
@@ -390,10 +648,7 @@ object DefaultGlobalCities {
             country = "Singapore",
             latitude = 1.3521,
             longitude = 103.8198,
-            timezone = "Asia/Singapore",
-            cachedTempC = 30.0,
-            cachedCondition = "Thunderstorm",
-            cachedSceneType = WeatherSceneType.THUNDERSTORM
+            timezone = "Asia/Singapore"
         ),
         SavedLocation(
             id = "cairo_eg",
@@ -402,10 +657,7 @@ object DefaultGlobalCities {
             country = "Egypt",
             latitude = 30.0444,
             longitude = 31.2357,
-            timezone = "Africa/Cairo",
-            cachedTempC = 29.0,
-            cachedCondition = "Golden Sunset",
-            cachedSceneType = WeatherSceneType.SUNSET
+            timezone = "Africa/Cairo"
         ),
         SavedLocation(
             id = "san_francisco_us",
@@ -414,10 +666,7 @@ object DefaultGlobalCities {
             country = "United States",
             latitude = 37.7749,
             longitude = -122.4194,
-            timezone = "America/Los_Angeles",
-            cachedTempC = 16.0,
-            cachedCondition = "Dense Fog",
-            cachedSceneType = WeatherSceneType.FOGGY
+            timezone = "America/Los_Angeles"
         ),
         SavedLocation(
             id = "sydney_au",
@@ -426,10 +675,7 @@ object DefaultGlobalCities {
             country = "Australia",
             latitude = -33.8688,
             longitude = 151.2093,
-            timezone = "Australia/Sydney",
-            cachedTempC = 24.0,
-            cachedCondition = "Sunny",
-            cachedSceneType = WeatherSceneType.SUNNY
+            timezone = "Australia/Sydney"
         ),
         SavedLocation(
             id = "rio_br",
@@ -438,10 +684,77 @@ object DefaultGlobalCities {
             country = "Brazil",
             latitude = -22.9068,
             longitude = -43.1729,
-            timezone = "America/Sao_Paulo",
-            cachedTempC = 27.0,
-            cachedCondition = "Partly Cloudy",
-            cachedSceneType = WeatherSceneType.CLOUDY
+            timezone = "America/Sao_Paulo"
+        )
+    )
+
+    /**
+     * Major agricultural divisions of Bangladesh for Smart Farming Mode.
+     */
+    val bangladeshFarmingHubs = listOf(
+        hubs.first(), // Dhaka
+        SavedLocation(
+            id = "rajshahi_bd",
+            cityName = "Rajshahi",
+            region = "Rajshahi Division",
+            country = "Bangladesh",
+            latitude = 24.3745,
+            longitude = 88.6042,
+            timezone = "Asia/Dhaka"
+        ),
+        SavedLocation(
+            id = "sylhet_bd",
+            cityName = "Sylhet",
+            region = "Sylhet Division",
+            country = "Bangladesh",
+            latitude = 24.8949,
+            longitude = 91.8687,
+            timezone = "Asia/Dhaka"
+        ),
+        SavedLocation(
+            id = "khulna_bd",
+            cityName = "Khulna",
+            region = "Khulna Division",
+            country = "Bangladesh",
+            latitude = 22.8456,
+            longitude = 89.5403,
+            timezone = "Asia/Dhaka"
+        ),
+        SavedLocation(
+            id = "chattogram_bd",
+            cityName = "Chattogram",
+            region = "Chattogram Division",
+            country = "Bangladesh",
+            latitude = 22.3569,
+            longitude = 91.7832,
+            timezone = "Asia/Dhaka"
+        ),
+        SavedLocation(
+            id = "rangpur_bd",
+            cityName = "Rangpur",
+            region = "Rangpur Division",
+            country = "Bangladesh",
+            latitude = 25.7439,
+            longitude = 89.2752,
+            timezone = "Asia/Dhaka"
+        ),
+        SavedLocation(
+            id = "barishal_bd",
+            cityName = "Barishal",
+            region = "Barishal Division",
+            country = "Bangladesh",
+            latitude = 22.7010,
+            longitude = 90.3535,
+            timezone = "Asia/Dhaka"
+        ),
+        SavedLocation(
+            id = "mymensingh_bd",
+            cityName = "Mymensingh",
+            region = "Mymensingh Division",
+            country = "Bangladesh",
+            latitude = 24.7471,
+            longitude = 90.4203,
+            timezone = "Asia/Dhaka"
         )
     )
 }

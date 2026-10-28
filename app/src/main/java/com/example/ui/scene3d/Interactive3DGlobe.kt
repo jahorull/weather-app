@@ -457,6 +457,7 @@ fun Interactive3DGlobeScreen(
                             globeYawDeg = (-city.longitude).toFloat()
                             globePitchDeg = (city.latitude * 0.45).toFloat()
                         }
+                        .testTag("globe_city_chip_${city.id}")
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -518,7 +519,7 @@ fun Interactive3DGlobeScreen(
                         Text(
                             text = selectedGlobeCity.cachedTempC?.let {
                                 WeatherFormatter.formatTemp(it, tempUnit)
-                            } ?: "Live",
+                            } ?: "--°",
                             style = MaterialTheme.typography.headlineLarge,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -527,7 +528,7 @@ fun Interactive3DGlobeScreen(
                         Text(
                             text = selectedGlobeCity.cachedCondition
                                 ?: selectedGlobeCity.cachedSceneType?.title
-                                ?: "Tap Open 3D Scene",
+                                ?: "Tap Open 3D Weather for live data",
                             style = MaterialTheme.typography.titleMedium,
                             color = Color.White.copy(alpha = 0.85f),
                             modifier = Modifier.padding(bottom = 4.dp)

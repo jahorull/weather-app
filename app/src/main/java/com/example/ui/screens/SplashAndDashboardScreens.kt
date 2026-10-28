@@ -27,6 +27,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Compress
@@ -36,6 +39,7 @@ import androidx.compose.material.icons.filled.LocationCity
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.WbTwilight
@@ -69,11 +73,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.model.AirQualityData
 import com.example.model.HourlyForecast
 import com.example.model.SavedLocation
 import com.example.model.UserSettings
+import com.example.model.WeatherAlert
 import com.example.model.WeatherBundle
 import com.example.model.WeatherFormatter
 import com.example.model.WeatherSceneType
@@ -157,12 +162,14 @@ fun Atmos3DSplashOverlay(
 }
 
 /**
- * Screen 2: Main Full-Screen Dashboard with 3D Weather Viewport, Hourly Strip, and 6 Telemetry Cards.
+ * Screen 2: Upgraded Full-Screen Dashboard with Live Weather, Air Quality (US AQI/PM2.5/PM10),
+ * Weather Alerts, 24-Hour Strip, 6 Telemetry Cards, and Honest Loading/Error/Retry States.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainDashboardScreen(
-    weatherBundle: WeatherBundle,
+    activeLocation: SavedLocation,
+    weatherBundle: WeatherBundle?,
     savedLocations: List<SavedLocation>,
     settings: UserSettings,
     activeSceneOverride: WeatherSceneType?,
@@ -176,14 +183,17 @@ fun MainDashboardScreen(
     onOverrideScene: (WeatherSceneType?) -> Unit,
     onNavigateToForecasts: () -> Unit,
     onNavigateToCities: () -> Unit,
+    onNavigateToAiCopilot: () -> Unit = {},
+    onAskAiAboutForecast: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showLocationRationaleDialog by remember { mutableStateOf(false) }
     var inspectedHour by remember { mutableStateOf<HourlyForecast?>(null) }
 
-    val current = weatherBundle.current
-    val location = weatherBundle.location
-    val effectiveScene = activeSceneOverride ?: current.sceneType
+    val effectiveScene = activeSceneOverride
+        ?: weatherBundle?.current?.sceneType
+        ?: activeLocation.cachedSceneType
+        ?: WeatherSceneType.SUNNY
     val accentColor = Color(effectiveScene.accentColorHex)
 
     if (showLocationRationaleDialog) {
@@ -236,6 +246,13 @@ fun MainDashboardScreen(
                 onPreview3DScene = {
                     onOverrideScene(hourItem.sceneType)
                     inspectedHour = null
+                },
+                onAskAiAboutHour = {
+                    val prompt = "Explain the forecast for ${activeLocation.cityName} at ${hourItem.displayHour} (${hourItem.conditionText}, ${
+                        WeatherFormatter.formatTemp(hourItem.temperatureC, settings.tempUnit)
+                    }, Rain ${WeatherFormatter.formatNullablePercent(hourItem.precipProbabilityPercent)}) and what I should prepare for."
+                    inspectedHour = null
+                    onAskAiAboutForecast(prompt)
                 }
             )
         }
@@ -259,12 +276,15 @@ fun MainDashboardScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "${location.cityName.uppercase()}, ${location.country.uppercase()}",
+                            text = "${activeLocation.cityName.uppercase()}, ${activeLocation.country.uppercase()}",
                             style = MaterialTheme.typography.labelSmall,
                             color = accentColor
                         )
+                        val tempLabel = weatherBundle?.current?.temperatureC?.let {
+                            WeatherFormatter.formatTemp(it, settings.tempUnit)
+                        } ?: "3D Viewport"
                         Text(
-                            text = "${WeatherFormatter.formatTemp(current.temperatureC, settings.tempUnit)} · ${effectiveScene.title}",
+                            text = "$tempLabel · ${effectiveScene.title}",
                             style = MaterialTheme.typography.titleLarge,
                             color = Color.White
                         )
@@ -291,7 +311,7 @@ fun MainDashboardScreen(
             }
         }
 
-        // Standard Dashboard Overlay Content
+        // Standard Dashboard Content
         AnimatedVisibility(
             visible = !isImmersiveMode,
             enter = fadeIn(),
@@ -304,7 +324,7 @@ fun MainDashboardScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // 1. Top Bar: City Selector, Live/Cached Status Badge, GPS & Refresh & Immersive Actions
+                // 1. Top Bar: City Selector, Live/Cached Status Badge, Local Time, GPS & Refresh & Immersive Actions
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -322,13 +342,13 @@ fun MainDashboardScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
                                     imageVector = Icons.Default.LocationCity,
-                                    contentDescription = null,
+                                    contentDescription = "Select city",
                                     tint = accentColor,
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "${location.cityName.uppercase()}, ${location.country.uppercase()}",
+                                    text = "${activeLocation.cityName.uppercase()}, ${activeLocation.country.uppercase()}",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
@@ -339,13 +359,14 @@ fun MainDashboardScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                // Live vs Cached Badge
+                                val isCached = weatherBundle?.isFromCache == true
+                                val hasLiveBundle = weatherBundle != null
                                 Surface(
                                     shape = RoundedCornerShape(10.dp),
-                                    color = if (weatherBundle.isFromCache) {
-                                        Color(0xFFF59E0B).copy(alpha = 0.25f)
-                                    } else {
-                                        Color(0xFF10B981).copy(alpha = 0.25f)
+                                    color = when {
+                                        !hasLiveBundle -> Color(0xFF64748B).copy(alpha = 0.35f)
+                                        isCached -> Color(0xFFF59E0B).copy(alpha = 0.25f)
+                                        else -> Color(0xFF10B981).copy(alpha = 0.25f)
                                     }
                                 ) {
                                     Row(
@@ -353,28 +374,34 @@ fun MainDashboardScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
-                                            imageVector = if (weatherBundle.isFromCache) Icons.Default.CloudOff else Icons.Default.CloudDone,
+                                            imageVector = if (isCached || !hasLiveBundle) Icons.Default.CloudOff else Icons.Default.CloudDone,
                                             contentDescription = null,
-                                            tint = if (weatherBundle.isFromCache) Color(0xFFFBBF24) else Color(0xFF34D399),
+                                            tint = if (isCached || !hasLiveBundle) Color(0xFFFBBF24) else Color(0xFF34D399),
                                             modifier = Modifier.size(12.dp)
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(
-                                            text = if (weatherBundle.isFromCache) {
-                                                stringResource(R.string.status_cached_data)
-                                            } else {
-                                                stringResource(R.string.status_live_data)
+                                            text = when {
+                                                !hasLiveBundle -> if (isRefreshing) "SYNCING..." else "OFFLINE"
+                                                isCached -> stringResource(R.string.status_cached_data)
+                                                else -> stringResource(R.string.status_live_data)
                                             },
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = if (weatherBundle.isFromCache) Color(0xFFFDE68A) else Color(0xFFA7F3D0)
+                                            color = if (isCached || !hasLiveBundle) Color(0xFFFDE68A) else Color(0xFFA7F3D0)
                                         )
                                     }
                                 }
 
+                                val localTimePrefix = weatherBundle?.current?.cityLocalTimeLabel
+                                    ?.takeIf { it.isNotBlank() && it != "Unavailable" }
+                                    ?.let { "Local $it · " } ?: ""
+
                                 Text(
-                                    text = WeatherFormatter.formatRelativeUpdateTime(weatherBundle.fetchedAtMillis),
+                                    text = localTimePrefix + WeatherFormatter.formatRelativeUpdateTime(
+                                        weatherBundle?.fetchedAtMillis ?: 0L
+                                    ),
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = Color.White.copy(alpha = 0.72f)
+                                    color = Color.White.copy(alpha = 0.75f)
                                 )
                             }
                         }
@@ -436,11 +463,9 @@ fun MainDashboardScreen(
                 // Quick Saved City Switcher Pills
                 if (savedLocations.size > 1) {
                     item {
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(savedLocations, key = { it.id }) { loc ->
-                                val isCurrent = loc.id == location.id
+                                val isCurrent = loc.id == activeLocation.id
                                 Surface(
                                     shape = RoundedCornerShape(16.dp),
                                     color = if (isCurrent) accentColor.copy(alpha = 0.30f) else Color.White.copy(alpha = 0.10f),
@@ -466,244 +491,179 @@ fun MainDashboardScreen(
                     }
                 }
 
-                // Error Banner if network failed
+                // Error / Cached Notice Banner with Retry Action
                 if (!errorMessage.isNullOrBlank()) {
                     item {
-                        FrostedGlassCard(cornerRadius = 16.dp, accentTint = Color(0xFFFBBF24)) {
-                            Text(
-                                text = errorMessage,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color(0xFFFDE68A)
-                            )
-                        }
-                    }
-                }
-
-                // 2. Hero 3D Weather Readout (Large Temperature, Condition, Feels Like, High / Low)
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            AnimatedWeatherConditionIcon(
-                                sceneType = effectiveScene,
-                                modifier = Modifier.size(54.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = WeatherFormatter.formatTemp(current.temperatureC, settings.tempUnit),
-                                style = MaterialTheme.typography.displayLarge,
-                                color = Color.White,
-                                modifier = Modifier.testTag("hero_current_temp")
-                            )
-                        }
-
-                        Text(
-                            text = "${WeatherFormatter.formatTemp(current.temperatureC, settings.tempUnit)} — ${
-                                if (activeSceneOverride != null) "${activeSceneOverride.title} (3D Preview)" else current.conditionText
-                            }",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = Color.White,
-                            fontWeight = FontWeight.SemiBold
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Text(
-                            text = "Feels Like ${WeatherFormatter.formatTemp(current.feelsLikeC, settings.tempUnit)}   ·   High ${
-                                WeatherFormatter.formatTemp(current.highC, settings.tempUnit, includeUnit = false)
-                            } · Low ${
-                                WeatherFormatter.formatTemp(current.lowC, settings.tempUnit, includeUnit = false)
-                            }",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = Color.White.copy(alpha = 0.88f)
-                        )
-                    }
-                }
-
-                // Interactive 3D Atmosphere Quick Switcher Bar (lets user explore all 8 3D environments immediately)
-                item {
-                    Column {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "3D ATMOSPHERE ENVIRONMENT",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.White.copy(alpha = 0.75f)
-                            )
-                            if (activeSceneOverride != null) {
-                                Text(
-                                    text = "Reset to Live Weather",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = accentColor,
-                                    modifier = Modifier
-                                        .clickable { onOverrideScene(null) }
-                                        .padding(4.dp)
-                                        .testTag("reset_live_scene_button")
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(WeatherSceneType.entries, key = { it.name }) { scene ->
-                                val isSelected = effectiveScene == scene
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = if (isSelected) Color(scene.accentColorHex).copy(alpha = 0.32f) else Color.White.copy(alpha = 0.09f),
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (isSelected) Color(scene.accentColorHex) else Color.White.copy(alpha = 0.12f),
-                                            shape = RoundedCornerShape(14.dp)
-                                        )
-                                        .clickable {
-                                            onOverrideScene(if (scene == current.sceneType) null else scene)
-                                        }
-                                        .testTag("scene_chip_${scene.name.lowercase()}")
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        AnimatedWeatherConditionIcon(
-                                            sceneType = scene,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = scene.title,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = Color.White
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 3. Horizontally Scrollable 24-Hour Forecast Card
-                item {
-                    FrostedGlassCard(accentTint = accentColor) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
+                        FrostedGlassCard(cornerRadius = 18.dp, accentTint = Color(0xFFFBBF24)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "HOURLY 24-HOUR FORECAST",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = accentColor
+                                    text = errorMessage,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color(0xFFFDE68A),
+                                    modifier = Modifier.weight(1f)
                                 )
-                                Text(
-                                    text = "Full Charts →",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = Color.White,
-                                    modifier = Modifier
-                                        .clickable { onNavigateToForecasts() }
-                                        .testTag("dashboard_open_forecasts_link")
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                items(weatherBundle.hourly, key = { it.timeIso + it.displayHour }) { hr ->
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(18.dp))
-                                            .background(Color.White.copy(alpha = 0.08f))
-                                            .clickable { inspectedHour = hr }
-                                            .padding(horizontal = 12.dp, vertical = 10.dp)
-                                    ) {
-                                        Text(
-                                            text = hr.displayHour,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = Color.White.copy(alpha = 0.85f)
-                                        )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        AnimatedWeatherConditionIcon(
-                                            sceneType = hr.sceneType,
-                                            modifier = Modifier.size(28.dp)
-                                        )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Text(
-                                            text = WeatherFormatter.formatTemp(hr.temperatureC, settings.tempUnit, includeUnit = false),
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = "${hr.precipProbabilityPercent}%",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color(0xFF38BDF8)
-                                        )
-                                    }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Button(
+                                    onClick = onRefreshWeather,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFFFBBF24),
+                                        contentColor = Color(0xFF041322)
+                                    ),
+                                    modifier = Modifier.testTag("banner_retry_button")
+                                ) {
+                                    Text("Retry")
                                 }
                             }
                         }
                     }
                 }
 
-                // 4. Compact Telemetry Grid: Row 1 (Humidity & Wind Speed + Direction)
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
+                // Handle Loading or No-Cache Offline State honestly without fake weather numbers
+                if (weatherBundle == null) {
+                    item {
                         FrostedGlassCard(
-                            modifier = Modifier.weight(1f),
-                            accentTint = accentColor
+                            cornerRadius = 24.dp,
+                            accentTint = accentColor,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("hero_current_temp")
                         ) {
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.WaterDrop,
-                                        contentDescription = null,
-                                        tint = Color(0xFF38BDF8),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "HUMIDITY",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.White.copy(alpha = 0.72f)
-                                    )
-                                }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 18.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                AnimatedWeatherConditionIcon(
+                                    sceneType = effectiveScene,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = if (activeSceneOverride != null) {
+                                        "3D Preset Active: ${effectiveScene.title}"
+                                    } else {
+                                        "3D Atmosphere: ${effectiveScene.title}"
+                                    },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = accentColor,
+                                    fontWeight = FontWeight.Bold
+                                )
                                 Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    text = "${current.humidityPercent}%",
-                                    style = MaterialTheme.typography.headlineLarge,
-                                    color = Color.White
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "${WeatherFormatter.humidityComfortLabel(current.humidityPercent)} · Dew point ${
-                                        WeatherFormatter.formatTemp(current.dewPointC, settings.tempUnit)
-                                    }",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Color.White.copy(alpha = 0.75f)
-                                )
+                                if (isRefreshing) {
+                                    CircularProgressIndicator(color = accentColor)
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = "Fetching live meteorological telemetry for ${activeLocation.cityName}…",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = Color.White,
+                                        textAlign = TextAlign.Center
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.CloudOff,
+                                        contentDescription = "No live weather connection",
+                                        tint = Color(0xFFFBBF24),
+                                        modifier = Modifier.size(40.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(
+                                        text = "Live Weather Data Unavailable",
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        color = Color.White
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "No cached forecast exists yet for ${activeLocation.cityName}. Check your internet connection and tap Retry, or explore the 3D weather presets below.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color.White.copy(alpha = 0.78f),
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    Button(
+                                        onClick = onRefreshWeather,
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = accentColor,
+                                            contentColor = Color(0xFF041322)
+                                        ),
+                                        modifier = Modifier.testTag("empty_state_retry_button")
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Retry Live Weather Fetch")
+                                    }
+                                }
                             }
                         }
+                    }
+                } else {
+                    val current = weatherBundle.current
 
-                        FrostedGlassCard(
-                            modifier = Modifier.weight(1f),
-                            accentTint = accentColor
+                    // 2. Hero 3D Weather Readout
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                AnimatedWeatherConditionIcon(
+                                    sceneType = effectiveScene,
+                                    modifier = Modifier.size(54.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = WeatherFormatter.formatTemp(current.temperatureC, settings.tempUnit),
+                                    style = MaterialTheme.typography.displayLarge,
+                                    color = Color.White,
+                                    modifier = Modifier.testTag("hero_current_temp")
+                                )
+                            }
+
+                            Text(
+                                text = "${WeatherFormatter.formatTemp(current.temperatureC, settings.tempUnit)} — ${
+                                    if (activeSceneOverride != null) "${activeSceneOverride.title} (3D Preset)" else current.conditionText
+                                }",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.testTag("hero_condition_label")
+                            )
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Text(
+                                text = "Feels Like ${WeatherFormatter.formatTemp(current.feelsLikeC, settings.tempUnit)}   ·   High ${
+                                    WeatherFormatter.formatTemp(current.highC, settings.tempUnit, includeUnit = false)
+                                } · Low ${
+                                    WeatherFormatter.formatTemp(current.lowC, settings.tempUnit, includeUnit = false)
+                                }   ·   Rain ${WeatherFormatter.formatNullablePercent(current.precipProbabilityPercent)}",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White.copy(alpha = 0.88f),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+
+                // 3. Interactive 3D Atmosphere Presets Grid (Always active & visible for all 8 weather scenes)
+                item {
+                    FrostedGlassCard(
+                        cornerRadius = 22.dp,
+                        accentTint = accentColor,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("weather_presets_section")
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -711,186 +671,414 @@ fun MainDashboardScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "WIND VECTOR",
+                                        text = "3D ATMOSPHERE ENVIRONMENT PRESETS",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = Color.White.copy(alpha = 0.72f)
+                                        color = accentColor
                                     )
+                                    Text(
+                                        text = "${effectiveScene.title} — ${effectiveScene.subtitle}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color.White.copy(alpha = 0.84f),
+                                        modifier = Modifier.testTag("active_preset_status_text")
+                                    )
+                                }
+                                if (activeSceneOverride != null) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = accentColor.copy(alpha = 0.24f),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .border(1.dp, accentColor, RoundedCornerShape(12.dp))
+                                            .clickable { onOverrideScene(null) }
+                                            .testTag("reset_live_scene_button")
+                                    ) {
+                                        Text(
+                                            text = "Reset to Live Weather",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = Color.White,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            val presetRows = WeatherSceneType.entries.chunked(2)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                presetRows.forEach { pair ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        pair.forEach { scene ->
+                                            val isSelected = effectiveScene == scene
+                                            val sceneAccent = Color(scene.accentColorHex)
+                                            Surface(
+                                                shape = RoundedCornerShape(14.dp),
+                                                color = if (isSelected) sceneAccent.copy(alpha = 0.32f) else Color.White.copy(alpha = 0.09f),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(14.dp))
+                                                    .border(
+                                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                                        color = if (isSelected) sceneAccent else Color.White.copy(alpha = 0.14f),
+                                                        shape = RoundedCornerShape(14.dp)
+                                                    )
+                                                    .clickable { onOverrideScene(scene) }
+                                                    .testTag("scene_chip_${scene.name.lowercase()}")
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    AnimatedWeatherConditionIcon(
+                                                        sceneType = scene,
+                                                        modifier = Modifier.size(22.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text(
+                                                        text = scene.title,
+                                                        style = MaterialTheme.typography.labelLarge,
+                                                        color = Color.White,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (weatherBundle != null) {
+                    val current = weatherBundle.current
+
+                    // 4. Weather Alerts Section (Real NWS Alerts + Live WMO Threshold Advisories)
+                    item {
+                        WeatherAlertsSectionCard(
+                            alerts = weatherBundle.alerts,
+                            accentColor = accentColor
+                        )
+                    }
+
+                    // 5. Horizontally Scrollable 24-Hour Forecast Card
+                    item {
+                        FrostedGlassCard(accentTint = accentColor) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "HOURLY 24-HOUR FORECAST",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = accentColor
+                                    )
+                                    Text(
+                                        text = "Interactive Charts & 7-Day →",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = Color.White,
+                                        modifier = Modifier
+                                            .clickable { onNavigateToForecasts() }
+                                            .testTag("dashboard_open_forecasts_link")
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    items(weatherBundle.hourly, key = { it.timeIso + it.displayHour }) { hr ->
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(18.dp))
+                                                .background(Color.White.copy(alpha = 0.08f))
+                                                .clickable { inspectedHour = hr }
+                                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                                        ) {
+                                            Text(
+                                                text = hr.displayHour,
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = Color.White.copy(alpha = 0.85f)
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            AnimatedWeatherConditionIcon(
+                                                sceneType = hr.sceneType,
+                                                modifier = Modifier.size(28.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = WeatherFormatter.formatTemp(hr.temperatureC, settings.tempUnit, includeUnit = false),
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = hr.precipProbabilityPercent?.let { "$it%" } ?: "N/A",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color(0xFF38BDF8)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 6. Live Air Quality Card (US AQI, PM2.5, PM10, O3, NO2)
+                    item {
+                        AirQualityDashboardCard(
+                            airQuality = weatherBundle.airQuality,
+                            accentColor = accentColor
+                        )
+                    }
+
+                    // 7. Compact Telemetry Grid: Row 1 (Humidity & Wind Speed + Direction)
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            FrostedGlassCard(
+                                modifier = Modifier.weight(1f),
+                                accentTint = accentColor
+                            ) {
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.WaterDrop,
+                                            contentDescription = null,
+                                            tint = Color(0xFF38BDF8),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "HUMIDITY",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White.copy(alpha = 0.72f)
+                                        )
+                                    }
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Text(
-                                        text = WeatherFormatter.formatWind(current.windSpeedKmh, settings.windUnit),
+                                        text = WeatherFormatter.formatNullablePercent(current.humidityPercent),
+                                        style = MaterialTheme.typography.headlineLarge,
+                                        color = Color.White
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    val dewText = current.dewPointC?.let {
+                                        " · Dew point ${WeatherFormatter.formatTemp(it, settings.tempUnit)}"
+                                    } ?: ""
+                                    Text(
+                                        text = "${WeatherFormatter.humidityComfortLabel(current.humidityPercent)}$dewText",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color.White.copy(alpha = 0.75f)
+                                    )
+                                }
+                            }
+
+                            FrostedGlassCard(
+                                modifier = Modifier.weight(1f),
+                                accentTint = accentColor
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "WIND VECTOR",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White.copy(alpha = 0.72f)
+                                        )
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Text(
+                                            text = WeatherFormatter.formatWind(current.windSpeedKmh, settings.windUnit),
+                                            style = MaterialTheme.typography.headlineMedium,
+                                            color = Color.White
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        val dirText = current.windDirectionDeg?.let {
+                                            "Dir: ${WeatherFormatter.windDirectionCardinal(it)} ($it°)"
+                                        } ?: "Dir: Unavailable"
+                                        Text(
+                                            text = dirText,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = Color.White.copy(alpha = 0.75f)
+                                        )
+                                    }
+                                    WindCompassDial(windDirectionDeg = current.windDirectionDeg ?: 0)
+                                }
+                            }
+                        }
+                    }
+
+                    // 8. Compact Telemetry Grid: Row 2 (UV Index & Visibility)
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            FrostedGlassCard(
+                                modifier = Modifier.weight(1f),
+                                accentTint = accentColor
+                            ) {
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.WbSunny,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFBBF24),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "UV INDEX",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White.copy(alpha = 0.72f)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(
+                                        text = WeatherFormatter.formatNullableUv(current.uvIndex),
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        color = Color.White
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    LinearProgressIndicator(
+                                        progress = { ((current.uvIndex?.toFloat() ?: 0f) / 11f).coerceIn(0.04f, 1f) },
+                                        color = Color(0xFFFBBF24),
+                                        trackColor = Color.White.copy(alpha = 0.16f),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(6.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                    )
+                                }
+                            }
+
+                            FrostedGlassCard(
+                                modifier = Modifier.weight(1f),
+                                accentTint = accentColor
+                            ) {
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Visibility,
+                                            contentDescription = null,
+                                            tint = Color(0xFF67E8F9),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "VISIBILITY",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White.copy(alpha = 0.72f)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(
+                                        text = WeatherFormatter.formatNullableVisibility(current.visibilityKm),
+                                        style = MaterialTheme.typography.headlineLarge,
+                                        color = Color.White
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    val visDesc = when {
+                                        current.visibilityKm == null -> "Station reading unavailable"
+                                        current.visibilityKm >= 9.0 -> "Clear horizon clarity"
+                                        else -> "Reduced by mist/haze"
+                                    }
+                                    Text(
+                                        text = visDesc,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color.White.copy(alpha = 0.75f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 9. Compact Telemetry Grid: Row 3 (Atmospheric Pressure & Sunrise/Sunset)
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            FrostedGlassCard(
+                                modifier = Modifier.weight(1f),
+                                accentTint = accentColor
+                            ) {
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Compress,
+                                            contentDescription = null,
+                                            tint = Color(0xFFA78BFA),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "PRESSURE",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White.copy(alpha = 0.72f)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(
+                                        text = WeatherFormatter.formatNullablePressure(current.pressureHpa),
                                         style = MaterialTheme.typography.headlineMedium,
                                         color = Color.White
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "Dir: ${WeatherFormatter.windDirectionCardinal(current.windDirectionDeg)} (${current.windDirectionDeg}°)",
+                                        text = WeatherFormatter.pressureTrendLabel(current.pressureHpa),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = Color.White.copy(alpha = 0.75f)
                                     )
                                 }
-                                WindCompassDial(windDirectionDeg = current.windDirectionDeg)
                             }
-                        }
-                    }
-                }
 
-                // 5. Compact Telemetry Grid: Row 2 (UV Index & Visibility)
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        FrostedGlassCard(
-                            modifier = Modifier.weight(1f),
-                            accentTint = accentColor
-                        ) {
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.WbSunny,
-                                        contentDescription = null,
-                                        tint = Color(0xFFFBBF24),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "UV INDEX",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.White.copy(alpha = 0.72f)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    text = "${String.format("%.1f", current.uvIndex)} · ${WeatherFormatter.uvCategoryLabel(current.uvIndex)}",
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    color = Color.White
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                LinearProgressIndicator(
-                                    progress = { (current.uvIndex.toFloat() / 11f).coerceIn(0.05f, 1f) },
-                                    color = Color(0xFFFBBF24),
-                                    trackColor = Color.White.copy(alpha = 0.16f),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(6.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                )
-                            }
-                        }
-
-                        FrostedGlassCard(
-                            modifier = Modifier.weight(1f),
-                            accentTint = accentColor
-                        ) {
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Visibility,
-                                        contentDescription = null,
-                                        tint = Color(0xFF67E8F9),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "VISIBILITY",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.White.copy(alpha = 0.72f)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    text = "${String.format("%.1f", current.visibilityKm)} km",
-                                    style = MaterialTheme.typography.headlineLarge,
-                                    color = Color.White
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = if (current.visibilityKm >= 9.0) "Clear horizon clarity" else "Reduced by mist/haze",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Color.White.copy(alpha = 0.75f)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // 6. Compact Telemetry Grid: Row 3 (Atmospheric Pressure & Sunrise/Sunset)
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        FrostedGlassCard(
-                            modifier = Modifier.weight(1f),
-                            accentTint = accentColor
-                        ) {
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Compress,
-                                        contentDescription = null,
-                                        tint = Color(0xFFA78BFA),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "PRESSURE",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.White.copy(alpha = 0.72f)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    text = "${current.pressureHpa.toInt()} hPa",
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    color = Color.White
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = WeatherFormatter.pressureTrendLabel(current.pressureHpa),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Color.White.copy(alpha = 0.75f)
-                                )
-                            }
-                        }
-
-                        FrostedGlassCard(
-                            modifier = Modifier.weight(1f),
-                            accentTint = accentColor
-                        ) {
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.WbTwilight,
-                                        contentDescription = null,
-                                        tint = Color(0xFFFB923C),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "SUNRISE & SUNSET",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.White.copy(alpha = 0.72f)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                SolarHorizonArc(
-                                    isDay = current.isDay,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(34.dp)
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column {
-                                        Text("Rise", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.6f))
-                                        Text(current.sunriseTime, style = MaterialTheme.typography.labelLarge, color = Color.White)
+                            FrostedGlassCard(
+                                modifier = Modifier.weight(1f),
+                                accentTint = accentColor
+                            ) {
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.WbTwilight,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFB923C),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "SUNRISE & SUNSET",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White.copy(alpha = 0.72f)
+                                        )
                                     }
-                                    Column(horizontalAlignment = Alignment.End) {
-                                        Text("Set", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.6f))
-                                        Text(current.sunsetTime, style = MaterialTheme.typography.labelLarge, color = Color.White)
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    SolarHorizonArc(
+                                        isDay = current.isDay,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(34.dp)
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column {
+                                            Text("Rise", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.6f))
+                                            Text(current.sunriseTime, style = MaterialTheme.typography.labelLarge, color = Color.White)
+                                        }
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text("Set", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.6f))
+                                            Text(current.sunsetTime, style = MaterialTheme.typography.labelLarge, color = Color.White)
+                                        }
                                     }
                                 }
                             }
@@ -903,10 +1091,187 @@ fun MainDashboardScreen(
 }
 
 @Composable
+private fun WeatherAlertsSectionCard(
+    alerts: List<WeatherAlert>,
+    accentColor: Color
+) {
+    if (alerts.isEmpty()) {
+        FrostedGlassCard(
+            cornerRadius = 18.dp,
+            accentTint = Color(0xFF34D399),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("weather_alerts_card")
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "No active weather alerts",
+                    tint = Color(0xFF34D399),
+                    modifier = Modifier.size(20.dp)
+                )
+                Column {
+                    Text(
+                        text = "WEATHER ALERTS · ALL CLEAR",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF34D399)
+                    )
+                    Text(
+                        text = "No active severe weather warnings or advisories for this location.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.82f)
+                    )
+                }
+            }
+        }
+    } else {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.testTag("weather_alerts_card")
+        ) {
+            alerts.forEach { alert ->
+                val alertColor = when (alert.severity.lowercase()) {
+                    "extreme", "severe" -> Color(0xFFEF4444)
+                    "moderate" -> Color(0xFFF59E0B)
+                    else -> accentColor
+                }
+                FrostedGlassCard(cornerRadius = 20.dp, accentTint = alertColor) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.WarningAmber,
+                                    contentDescription = "Weather Alert",
+                                    tint = alertColor,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "WEATHER ALERT · ${alert.severity.uppercase()}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = alertColor
+                                )
+                            }
+                            Text(
+                                text = alert.issuedAt,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.68f)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = alert.headline,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = alert.description,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.85f)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Area: ${alert.affectedArea} · Issued: ${alert.issuedAt} · Expires: ${alert.expiresAt} · Source: ${alert.source}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.65f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AirQualityDashboardCard(
+    airQuality: AirQualityData?,
+    accentColor: Color
+) {
+    val aqiValue = airQuality?.usAqi
+    val badgeColor = Color(WeatherFormatter.aqiColorHex(aqiValue))
+
+    FrostedGlassCard(
+        accentTint = badgeColor,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("air_quality_card")
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Air,
+                        contentDescription = null,
+                        tint = badgeColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "AIR QUALITY INDEX (US AQI)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = badgeColor
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = badgeColor.copy(alpha = 0.22f)
+                ) {
+                    Text(
+                        text = WeatherFormatter.aqiCategoryLabel(aqiValue),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = badgeColor,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MetricMiniColumn(
+                    label = "US AQI",
+                    value = aqiValue?.toString() ?: "Unavailable"
+                )
+                MetricMiniColumn(
+                    label = "PM2.5",
+                    value = WeatherFormatter.formatNullablePollutant(airQuality?.pm25)
+                )
+                MetricMiniColumn(
+                    label = "PM10",
+                    value = WeatherFormatter.formatNullablePollutant(airQuality?.pm10)
+                )
+                MetricMiniColumn(
+                    label = "Ozone (O₃)",
+                    value = WeatherFormatter.formatNullablePollutant(airQuality?.ozone)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun HourlyDetailSheetContent(
     hour: HourlyForecast,
     settings: UserSettings,
-    onPreview3DScene: () -> Unit
+    onPreview3DScene: () -> Unit,
+    onAskAiAboutHour: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -943,19 +1308,36 @@ private fun HourlyDetailSheetContent(
         ) {
             MetricMiniColumn("Temperature", WeatherFormatter.formatTemp(hour.temperatureC, settings.tempUnit))
             MetricMiniColumn("Feels Like", WeatherFormatter.formatTemp(hour.feelsLikeC, settings.tempUnit))
-            MetricMiniColumn("Rain Prob", "${hour.precipProbabilityPercent}%")
+            MetricMiniColumn("Rain Prob", WeatherFormatter.formatNullablePercent(hour.precipProbabilityPercent))
             MetricMiniColumn("Wind", WeatherFormatter.formatWind(hour.windSpeedKmh, settings.windUnit))
         }
 
-        Button(
-            onClick = onPreview3DScene,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(hour.sceneType.accentColorHex),
-                contentColor = Color(0xFF041322)
-            ),
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("Simulate ${hour.sceneType.title} 3D Environment")
+            Button(
+                onClick = onAskAiAboutHour,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF38BDF8),
+                    contentColor = Color(0xFF041322)
+                ),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Ask AI Copilot")
+            }
+            Button(
+                onClick = onPreview3DScene,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(hour.sceneType.accentColorHex).copy(alpha = 0.25f),
+                    contentColor = Color.White
+                ),
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Simulate 3D")
+            }
         }
         Spacer(modifier = Modifier.height(12.dp))
     }
@@ -965,6 +1347,6 @@ private fun HourlyDetailSheetContent(
 private fun MetricMiniColumn(label: String, value: String) {
     Column {
         Text(label, style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.65f))
-        Text(value, style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold)
+        Text(value, style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold)
     }
 }

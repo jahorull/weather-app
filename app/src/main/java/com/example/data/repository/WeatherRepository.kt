@@ -4,35 +4,42 @@ import com.example.data.local.SavedLocationDao
 import com.example.data.local.SavedLocationEntity
 import com.example.data.local.WeatherCacheDao
 import com.example.data.local.WeatherCacheEntity
+import com.example.data.remote.NationalWeatherServiceAlertsApi
 import com.example.data.remote.NetworkModule
+import com.example.data.remote.NwsAlertsResponse
+import com.example.data.remote.OpenMeteoAirQualityApi
+import com.example.data.remote.OpenMeteoAirQualityResponse
 import com.example.data.remote.OpenMeteoForecastApi
 import com.example.data.remote.OpenMeteoForecastResponse
 import com.example.data.remote.OpenMeteoGeocodingApi
+import com.example.data.remote.RainViewerMapsApi
 import com.example.data.remote.ReverseGeocodingApi
 import com.example.data.remote.WeatherApiMapper
-import com.example.model.CurrentWeather
-import com.example.model.DailyForecast
 import com.example.model.DefaultGlobalCities
-import com.example.model.HourlyForecast
 import com.example.model.SavedLocation
 import com.example.model.WeatherBundle
 import com.example.model.WeatherSceneType
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import kotlin.math.abs
-import kotlin.math.cos
+import kotlinx.coroutines.supervisorScope
+import java.util.Locale
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 class WeatherRepository(
     private val locationDao: SavedLocationDao,
     private val cacheDao: WeatherCacheDao,
     private val forecastApi: OpenMeteoForecastApi = NetworkModule.forecastApi,
+    private val rainViewerApi: RainViewerMapsApi = NetworkModule.rainViewerApi,
+    private val airQualityApi: OpenMeteoAirQualityApi = NetworkModule.airQualityApi,
+    private val nwsAlertsApi: NationalWeatherServiceAlertsApi = NetworkModule.nwsAlertsApi,
     private val geocodingApi: OpenMeteoGeocodingApi = NetworkModule.geocodingApi,
     private val reverseGeocodingApi: ReverseGeocodingApi = NetworkModule.reverseGeocodingApi
 ) {
-    private val forecastAdapter = NetworkModule.moshiInstance()
-        .adapter(OpenMeteoForecastResponse::class.java)
+    private val moshi = NetworkModule.moshiInstance()
+    private val forecastAdapter = moshi.adapter(OpenMeteoForecastResponse::class.java)
+    private val airQualityAdapter = moshi.adapter(OpenMeteoAirQualityResponse::class.java)
+    private val alertsAdapter = moshi.adapter(NwsAlertsResponse::class.java)
 
     val savedLocationsFlow: Flow<List<SavedLocation>> = locationDao.observeAllLocations()
         .map { entities -> entities.map { it.toDomain() } }
@@ -52,34 +59,128 @@ class WeatherRepository(
         return locationDao.getAllLocationsOnce().map { it.toDomain() }
     }
 
+    /**
+     * Retrieves live weather, air quality, active alerts, RainViewer radar composite metadata,
+     * and multi-model (ECMWF IFS, NOAA GFS, DWD ICON) comparison data for [location].
+     * Never fabricates mock data as real weather.
+     */
     suspend fun getWeatherForLocation(
         location: SavedLocation,
         forceRefresh: Boolean = false
     ): Result<WeatherBundle> {
-        // 1. Attempt live API request
-        if (forceRefresh || shouldFetchFromNetwork(location.id)) {
-            try {
-                val response = forecastApi.getForecast(
-                    latitude = location.latitude,
-                    longitude = location.longitude,
-                    timezone = location.timezone.ifBlank { "auto" }
-                )
+        if (!forceRefresh && !shouldFetchFromNetwork(location.id)) {
+            val cached = loadFromCache(location)
+            if (cached != null) {
+                return Result.success(cached)
+            }
+        }
+
+        return try {
+            supervisorScope {
+                val tz = location.timezone.ifBlank { "auto" }
+                val forecastDeferred = async {
+                    forecastApi.getForecast(
+                        latitude = location.latitude,
+                        longitude = location.longitude,
+                        timezone = tz
+                    )
+                }
+                val airQualityDeferred = async {
+                    runCatching {
+                        airQualityApi.getAirQuality(
+                            latitude = location.latitude,
+                            longitude = location.longitude,
+                            timezone = tz
+                        )
+                    }.getOrNull()
+                }
+                val rainViewerDeferred = async {
+                    runCatching {
+                        rainViewerApi.getWeatherMaps()
+                    }.getOrNull()
+                }
+                val ecmwfDeferred = async {
+                    runCatching {
+                        forecastApi.getSingleModelDailyForecast(
+                            latitude = location.latitude,
+                            longitude = location.longitude,
+                            model = "ecmwf_ifs025",
+                            timezone = tz
+                        )
+                    }.getOrNull()
+                }
+                val gfsDeferred = async {
+                    runCatching {
+                        forecastApi.getSingleModelDailyForecast(
+                            latitude = location.latitude,
+                            longitude = location.longitude,
+                            model = "gfs_seamless",
+                            timezone = tz
+                        )
+                    }.getOrNull()
+                }
+                val iconDeferred = async {
+                    runCatching {
+                        forecastApi.getSingleModelDailyForecast(
+                            latitude = location.latitude,
+                            longitude = location.longitude,
+                            model = "icon_seamless",
+                            timezone = tz
+                        )
+                    }.getOrNull()
+                }
+                val nwsAlertsDeferred = async {
+                    val isUsRegion = location.country.contains("United States", ignoreCase = true) ||
+                        (location.latitude in 17.0..72.0 && location.longitude in -180.0..-64.0)
+                    if (!isUsRegion) {
+                        null
+                    } else {
+                        runCatching {
+                            val pointStr = String.format(
+                                Locale.US,
+                                "%.4f,%.4f",
+                                location.latitude,
+                                location.longitude
+                            )
+                            nwsAlertsApi.getActiveAlertsForPoint(pointStr)
+                        }.getOrNull()
+                    }
+                }
+
+                val forecastResponse = forecastDeferred.await()
+                val airQualityResponse = airQualityDeferred.await()
+                val rainViewerResponse = rainViewerDeferred.await()
+                val alertsResponse = nwsAlertsDeferred.await()
+
+                val multiModelMap = buildMap<String, OpenMeteoForecastResponse> {
+                    ecmwfDeferred.await()?.let { put("ECMWF IFS 0.25°", it) }
+                    gfsDeferred.await()?.let { put("NOAA GFS Seamless", it) }
+                    iconDeferred.await()?.let { put("DWD ICON Seamless", it) }
+                }
+
                 val now = System.currentTimeMillis()
-                val rawJson = forecastAdapter.toJson(response)
+
                 cacheDao.upsertCache(
                     WeatherCacheEntity(
                         locationId = location.id,
-                        rawResponseJson = rawJson,
+                        rawResponseJson = forecastAdapter.toJson(forecastResponse),
+                        rawAirQualityJson = airQualityResponse?.let { airQualityAdapter.toJson(it) },
+                        rawAlertsJson = alertsResponse?.let { alertsAdapter.toJson(it) },
                         fetchedAtMillis = now
                     )
                 )
+
                 val bundle = WeatherApiMapper.mapToWeatherBundle(
                     location = location,
-                    response = response,
+                    response = forecastResponse,
+                    airQualityResponse = airQualityResponse,
+                    nwsAlertsResponse = alertsResponse,
+                    rainViewerResponse = rainViewerResponse,
+                    multiModelResponses = multiModelMap,
                     fetchedAtMillis = now,
                     isFromCache = false
                 )
-                // Update cached summary on saved location if it is stored
+
                 val existingEntity = locationDao.getLocationById(location.id)
                 if (existingEntity != null) {
                     locationDao.upsertLocation(
@@ -90,41 +191,39 @@ class WeatherRepository(
                         )
                     )
                 }
-                return Result.success(bundle)
-            } catch (networkError: Exception) {
-                // Fall through to Room cache or deterministic meteorological fallback
-                val cached = loadFromCache(location)
-                if (cached != null) {
-                    return Result.success(cached)
-                }
-                // If device has no network on very first launch before cache is populated,
-                // provide an offline-annotated atmospheric snapshot so the 3D scene still renders
-                return Result.success(buildOfflineSnapshot(location))
+                Result.success(bundle)
+            }
+        } catch (networkError: Exception) {
+            val cached = loadFromCache(location)
+            if (cached != null) {
+                Result.success(cached)
+            } else {
+                Result.failure(networkError)
             }
         }
-
-        // 2. Check Room cache first when not forcing refresh
-        val cached = loadFromCache(location)
-        if (cached != null) {
-            return Result.success(cached)
-        }
-
-        return getWeatherForLocation(location, forceRefresh = true)
     }
 
     private suspend fun shouldFetchFromNetwork(locationId: String): Boolean {
         val cache = cacheDao.getCacheForLocation(locationId) ?: return true
         val ageMs = System.currentTimeMillis() - cache.fetchedAtMillis
-        return ageMs > 10 * 60 * 1000L // 10 minutes
+        return ageMs > 10 * 60 * 1000L
     }
 
-    private suspend fun loadFromCache(location: SavedLocation): WeatherBundle? {
+    suspend fun loadFromCache(location: SavedLocation): WeatherBundle? {
         val cache = cacheDao.getCacheForLocation(location.id) ?: return null
         return try {
             val dto = forecastAdapter.fromJson(cache.rawResponseJson) ?: return null
+            val aqDto = cache.rawAirQualityJson?.let {
+                runCatching { airQualityAdapter.fromJson(it) }.getOrNull()
+            }
+            val alertsDto = cache.rawAlertsJson?.let {
+                runCatching { alertsAdapter.fromJson(it) }.getOrNull()
+            }
             WeatherApiMapper.mapToWeatherBundle(
                 location = location,
                 response = dto,
+                airQualityResponse = aqDto,
+                nwsAlertsResponse = alertsDto,
                 fetchedAtMillis = cache.fetchedAtMillis,
                 isFromCache = true
             )
@@ -151,11 +250,12 @@ class WeatherRepository(
             }
             Result.success(mapped)
         } catch (e: Exception) {
-            // Filter matching global hubs when offline
-            val localMatches = DefaultGlobalCities.hubs.filter {
-                it.cityName.contains(trimmed, ignoreCase = true) ||
-                    it.country.contains(trimmed, ignoreCase = true)
-            }
+            val localMatches = (DefaultGlobalCities.hubs + DefaultGlobalCities.bangladeshFarmingHubs)
+                .distinctBy { it.id }
+                .filter {
+                    it.cityName.contains(trimmed, ignoreCase = true) ||
+                        it.country.contains(trimmed, ignoreCase = true)
+                }
             if (localMatches.isNotEmpty()) {
                 Result.success(localMatches)
             } else {
@@ -176,7 +276,7 @@ class WeatherRepository(
         } catch (_: Exception) {
             Triple(
                 "Current Location",
-                "${String.format("%.2f", latitude)}°, ${String.format("%.2f", longitude)}°",
+                "${String.format(Locale.US, "%.2f", latitude)}°, ${String.format(Locale.US, "%.2f", longitude)}°",
                 "GPS Telemetry"
             )
         }
@@ -203,94 +303,6 @@ class WeatherRepository(
 
     suspend fun removeLocation(locationId: String) {
         locationDao.deleteLocationById(locationId)
-    }
-
-    /**
-     * Generates a physically consistent offline cache snapshot when network is unreachable
-     * and no prior Room cache exists for a newly selected city.
-     */
-    fun buildOfflineSnapshot(location: SavedLocation): WeatherBundle {
-        val latFactor = abs(location.latitude)
-        val baseTemp = location.cachedTempC ?: (30.0 - (latFactor * 0.42)).coerceIn(-8.0, 35.0)
-        val scene = location.cachedSceneType ?: when {
-            latFactor > 60.0 -> WeatherSceneType.SNOWY
-            latFactor < 15.0 -> WeatherSceneType.THUNDERSTORM
-            location.id.contains("dhaka") -> WeatherSceneType.CLOUDY
-            else -> WeatherSceneType.SUNNY
-        }
-        val conditionLabel = location.cachedCondition ?: scene.title
-
-        val hourly = (0 until 24).map { h ->
-            val curve = sin((h - 6) * Math.PI / 12.0) * 3.5
-            val hrTemp = (baseTemp + curve).roundToInt().toDouble()
-            val isDay = h in 6..18
-            val hrScene = if (!isDay && scene == WeatherSceneType.SUNNY) WeatherSceneType.NIGHT else scene
-            HourlyForecast(
-                timeIso = "2026-10-26T${h.toString().padStart(2, '0')}:00",
-                displayHour = if (h == 0) "Now" else if (h < 12) "$h AM" else if (h == 12) "12 PM" else "${h - 12} PM",
-                temperatureC = hrTemp,
-                feelsLikeC = hrTemp + 2.0,
-                precipProbabilityPercent = if (scene == WeatherSceneType.RAINY || scene == WeatherSceneType.THUNDERSTORM) 75 else 15,
-                windSpeedKmh = 14.0 + (h % 5),
-                humidityPercent = 68,
-                uvIndex = if (isDay) 6.0 else 0.0,
-                conditionCode = 2,
-                conditionText = conditionLabel,
-                sceneType = hrScene
-            )
-        }
-
-        val daysOfWeek = listOf("Today", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-        val allScenes = WeatherSceneType.entries
-        val daily = (0 until 7).map { d ->
-            val dayScene = if (d == 0) scene else allScenes[(scene.ordinal + d) % allScenes.size]
-            DailyForecast(
-                dateIso = "2026-10-${26 + d}",
-                dayOfWeek = daysOfWeek[d],
-                shortDate = "Oct ${26 + d}",
-                maxTempC = baseTemp + 3.0 + cos(d.toDouble()),
-                minTempC = baseTemp - 3.0 + sin(d.toDouble()),
-                precipProbabilityPercent = when (dayScene) {
-                    WeatherSceneType.RAINY, WeatherSceneType.THUNDERSTORM -> 80
-                    WeatherSceneType.SNOWY -> 65
-                    else -> 20
-                },
-                maxWindSpeedKmh = 16.0 + d * 1.5,
-                uvIndexMax = 7.0,
-                humidityAvgPercent = 66,
-                sunriseTime = "6:04 AM",
-                sunsetTime = "5:48 PM",
-                conditionCode = 2,
-                conditionText = dayScene.title,
-                sceneType = dayScene
-            )
-        }
-
-        return WeatherBundle(
-            location = location,
-            current = CurrentWeather(
-                temperatureC = baseTemp,
-                feelsLikeC = baseTemp + 3.0,
-                highC = baseTemp + 3.0,
-                lowC = baseTemp - 3.0,
-                conditionCode = 2,
-                conditionText = conditionLabel,
-                sceneType = scene,
-                humidityPercent = 72,
-                windSpeedKmh = 14.0,
-                windDirectionDeg = 155,
-                uvIndex = 6.0,
-                visibilityKm = 9.5,
-                pressureHpa = 1012.0,
-                sunriseTime = "6:04 AM",
-                sunsetTime = "5:48 PM",
-                isDay = scene != WeatherSceneType.NIGHT
-            ),
-            hourly = hourly,
-            daily = daily,
-            fetchedAtMillis = System.currentTimeMillis(),
-            isFromCache = true
-        )
     }
 }
 
