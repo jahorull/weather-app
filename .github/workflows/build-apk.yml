@@ -32,6 +32,20 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
           yes | sdkmanager --licenses
 
+      - name: Generate debug keystore
+        run: |
+          keytool -genkeypair \
+            -v \
+            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
+            -storetype JKS \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
       - name: Build APK
         run: |
           gradle :app:assembleDebug
